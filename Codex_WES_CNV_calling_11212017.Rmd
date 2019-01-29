@@ -1,0 +1,360 @@
+---
+title: "Codex_CNV_processing"
+author: "Lala Motlhabi"
+date: "11/21/2017"
+output: 
+  html_document: 
+    fig_height: 10
+    fig_width: 10
+    toc: yes
+    toc_depth: 4
+    toc_float: true
+    keep_md: yes
+    self_contained: no
+    output:
+      pandoc_args: [
+      "+RTS", "-K64m",
+      "-RTS"
+    ]
+---
+#This document aims to evaluate the CODEX R package for Copy number variations detection in Exome sequencing data.
+#The data used are for the project DA0000085.
+
+CODEX by default uses hg19 as reference. You can however adapt it to hg38 instead. To do so you need to download the package https://www.bioconductor.org/packages/release/data/annotation/html/BSgenome.Hsapiens.UCSC.hg38.html . After loading CODEX, you need to load this package so that the Hsapiens by CODEX (hg19) is masked as hg38.
+
+The reference is only used to calculate the GC content. Mappability is bit more complicated and takes longer to run. For CODEX, we pre-compute the mappability for all exonic regions in hg19. For your case, I recommend setting all mappability to 1. That is, mapp=rep(1,length(gc)). Mappability is only used in the QC procedure so this shouldn’t affect  final output too much.  want, Op can also perform QC based on annotation results, i.e., you can remove all exons within segmental duplication regions, which generally have low mappability.
+ 
+```{r setup, include=FALSE}
+#setwd("/rcecloud/lmotlhabi/bsub_scripts/DA0000085/CNV_Callers/Codex/")
+# this is the configuration part of the report
+#library("XMLRPC")
+library("rtracklayer")
+
+# Install dependent packages first
+source("https://bioconductor.org/biocLite.R")
+
+biocLite("GenomeInfoDb")
+
+biocLite("BSgenome.Hsapiens.UCSC.hg19")
+
+# Install CODEX
+
+library(devtools)
+install_github("yuchaojiang/CODEX/package")
+library("CODEX")
+library("Rsamtools")
+
+biocLite("BSgenome.Hsapiens.UCSC.hg38")
+
+library(BSgenome.Hsapiens.UCSC.hg38)
+
+```
+
+Input-bam files : GATK-recalibrated bam files
+```{r Getbams, eval=FALSE}
+bf <- BamFile(bamfiles[1])
+sl <- seqlengths(bf)
+bamfiles=sapply(bamfiles,function(X){
+	file.copy(X, basename(X))
+	basename(X)
+})
+
+
+file.copy( cf(exome.bed), basename(exome.bed))
+exome.bed=basename(exome.bed)
+
+```
+
+
+CODEX by default is for hg19 reference. It can be adapted to hg38: only the calculations of GC content and mappability need to be changed; to get coverage for exons across samples stays the same (make sure that the exonic targets in the bed file are also in hg38 coordinates). To calculte GC content in hg38, you need to download the hg38 reference from Bioconductor. Then, after loading CODEX, load the hg38 reference package so that the Hsapiens (hg19 by CODEX's default) is masked to hg38. Note that the getgc() function needs to be sourced again so that the correct version of Hsapiens is used (in CODEX2 this will be an argument).
+
+```{r InvokeHg38}
+
+source("https://bioconductor.org/biocLite.R")
+biocLite("BSgenome.Hsapiens.UCSC.hg38")
+
+library(CODEX)
+library(BSgenome.Hsapiens.UCSC.hg38)
+# The following object is masked from ‘package:BSgenome.Hsapiens.UCSC.hg19’:  Hsapiens
+
+# Source getgc() function again so it uses the right Hsapiens
+getgc = function (chr, ref) {
+  if (chr == "X" | chr == "x" | chr == "chrX" | chr == "chrx") {
+    chrtemp <- 23
+  } else if (chr == "Y" | chr == "y" | chr == "chrY" | chr == "chry") {
+    chrtemp <- 24
+  } else {
+    chrtemp <- as.numeric(mapSeqlevels(as.character(chr), "NCBI")[1])
+  }
+  if (length(chrtemp) == 0) message("Chromosome cannot be found in NCBI Homo sapiens database!")
+  chrm <- unmasked(Hsapiens[[chrtemp]])
+  seqs <- Views(chrm, ref)
+  af <- alphabetFrequency(seqs, baseOnly = TRUE, as.prob = TRUE)
+  gc <- round((af[, "G"] + af[, "C"]) * 100, 2)
+  gc
+}
+
+
+```
+
+
+
+the bamdir argument is in fact a list of bam files
+the _ _getcoverage_ function expects a bam index file with the extension _.bam.bai_
+In function _segment_ for germline used mode "integer" while for for somatic CNV use "fraction"
+
+
+##get Coverage
+
+
+```{r getCoverage, echo=FALSE}
+library(parallel)
+
+bamdir<-list.files("/rcecloud/lmotlhabi/bsub_scripts/DA0000085/bams_recalibrate/",pattern=".bam$",full.names =T )
+sampnames<-basename(bamdir)
+sampnames<-sub(".human.GATK.Recalibrate.bam","",sampnames)
+exome.bed<-"/home/lmotlhabi/bsub_scripts/DA0000085/CNV_callers/Codex/batch1/nexterarapidcapture_exome_targetedregions_v1.2.bed"
+#exome.bed<-"/rcecloud/lmotlhabi/bsub_scripts/DA0000085/nexterarapidcapture_exome_targetedregions_v1.2.bed"
+coverageObj=list()
+chromosomes=c(seq(1,22) , 'X','Y')
+coverageObj=mclapply( chromosomes,FUN=function(chr){
+  #Create the bambed object
+  #the bamdir argument is in fact a list of bam files
+  bambedObj=getbambed( bamdir = bamdir , 
+                       bedFile = exome.bed, 
+                       
+                       sampname=as.matrix(sampname) , 
+                       projectname="DA0000085_PDXmdls", chr=chr)
+  getcoverage( bambedObj, mapqthres = 10)
+})
+
+save.image("coverage.rda")
+
+
+```
+
+
+To calculate mappability for hg38 is a bit more complicated and time-consuming. For CODEX, we pre-compute mappabilities for all hg19 exons and store them as part of the package. For hg38, there are two workarounds: 1) set all mappability to 1 using mapp=rep(1,length(gc)) since mappability is only used in the QC step to filter out exons with low mappability and thus should not affect the final output too much; 2) adopt QC procedures based on annotation results, e.g., filter out all exons within segmental duplication regions, which generally have low mappability.
+
+
+```{r getFinalCall}
+load("/rcecloud/lmotlhabi/bsub_scripts/DA0000085/CNV_Callers/Codex/coverage.rda")
+finalcall2_list<-list()
+#for(i in seq_along(chromosomes)){names(coverageObj)[i]<-chromosomes[i]}
+
+#projectname="DA0000085_PDXmdls"
+#for(chr in names(coverageObj)){
+#coverageObj[[chr]]$readlength[ is.na(coverageObj[[chr]]$readlength)]<-100 
+#make sure the indinces and Chr in bedfile match: "coverageObj"(23,24), befile("X"","Y")
+chromosomes=c(seq(1,22), 'X')#,'Y')
+#chromosomes=c(1:3,5,7,9,11,13,15,17:22 , 'X','Y')
+#finalcall2_list<-mclapply( chromosomes,FUN=function(chr){
+  #chromosomes=c(seq(1,22), 'X')
+  #if(chr==24){chr='Y'}
+for(chr in seq_along(chromosomes)){  
+readlength = coverageObj[[chr]]$readlength
+  
+  bambedObj=getbambed( bamdir = bamdir , 
+                       bedFile = exome.bed, 
+                       sampname=as.matrix(sampnames) , 
+                       projectname="DA0000085_PDXmdls", chr=chromosomes[chr])
+  gc = getgc(bambedObj$chr, bambedObj$ref)
+  gc[is.na(gc)]=0
+  
+  mapp=getmapp(bambedObj$chr, bambedObj$ref)
+   if(chr=='X'){chr=23}
+  qcObj <- qc(coverageObj[[chr]]$Y, 
+              bambedObj$sampname, 
+              bambedObj$chr, 
+              bambedObj$ref, 
+              mapp, 
+              gc, 
+              cov_thresh = c(20, 4000),
+              length_thresh = c(20, 2000), 
+              mapp_thresh = 0.9, 
+              gc_thresh = c(20, 80)
+  )
+  
+  Y_qc =qcObj$Y_qc; sampname_qc =qcObj$sampname_qc; gc_qc = qcObj$gc_qc
+  mapp_qc =qcObj$mapp_qc; ref_qc =qcObj$ref_qc; 
+  qcmat =qcObj$qcmat
+  write.table(qcmat, file = paste0( bambedObj$projectname, '_',  bambedObj$chr,'_qcmat', '.txt'),sep="\t",quote=FALSE,row.names=FALSE)
+  
+  
+  
+  # use the following if we have normal samples
+  normObj <- normalize2(Y_qc, gc_qc, K = 1:2, normal_index=grep("^NA128",sampnames))
+  #save.iamge("normalize.RData")
+  Yhat = normObj$Yhat
+  AIC <- normObj$AIC
+  BIC <- normObj$BIC
+  RSS=normObj$RSS
+  K=normObj$K
+  
+  
+  
+  choiceofK(AIC, BIC, RSS, K, filename = paste0(bambedObj$projectname, "_", bambedObj$chr,
+                                                "_choiceofK", ".pdf"))
+  optK = K[which.max(BIC)]
+  
+  # for germline used mode integer
+  # for somatic CNV use fraction
+  finalcall2 = segment(Y_qc, Yhat, optK = optK, K = K, sampname_qc,ref_qc, bambedObj$chr, lmax = 200, mode = "fraction")
+  finalcall2 =as.data.frame(finalcall2)
+  finalcall2=split(finalcall2, f=finalcall2$sample_name)
+  save(finalcall2,file=paste("chr",chr,"_finalCall2.rda",sep=""))
+}  
+#})
+#finallcall2_list failed @ChrY
+
+
+```
+
+####Get All samples
+
+```{r getAllsamples}
+finalCalls<-list.files(pattern="finalCall2.rda")
+finalcall2_list<-list()
+chromosomes<-sub("_finalCall2.rda","",finalCalls)
+for(i in seq_along(chromosomes)){
+  #load(paste("RData",finalCalls[i],sep="/"))
+  load(finalCalls[i])
+  finalcall2_list[[i]]<-finalcall2
+  names(finalcall2_list)[i]<-chromosomes[i]
+   }
+save(finalcall2_list,file="Codex_finalcall2_list.RData")
+```
+
+ "Fractional" mode for somatic CNVs from heterogenous samples
+https://github.com/yuchaojiang/CODEX/blob/master/instructions/finalcall_null_region.R
+
+Generate all CNV segments including copy number neutral region
+
+```{r GetAllsegmentsPlusNeutral}
+load("/rcecloud/lmotlhabi/bsub_scripts/DA0000085/CNV_Callers/Codex/coverage.rda")
+
+#projectname="DA0000085_PDXmdls"
+#for(chr in names(coverageObj)){
+#coverageObj[[chr]]$readlength[ is.na(coverageObj[[chr]]$readlength)]<-100 
+#make sure the indinces and Chr in bedfile match: "coverageObj"(23,24), befile("X"","Y")
+chromosomes=c(seq(1,22), 'X')#,'Y')
+
+for(chr in seq_along(chromosomes)){  
+readlength = coverageObj[[chr]]$readlength
+  
+  bambedObj=getbambed( bamdir = bamdir , 
+                       bedFile = exome.bed, 
+                       sampname=as.matrix(sampnames) , 
+                       projectname="DA0000085_PDXmdls", chr=chromosomes[chr])
+  gc = getgc(bambedObj$chr, bambedObj$ref)
+  gc[is.na(gc)]=0
+  
+  mapp=getmapp(bambedObj$chr, bambedObj$ref)
+   if(chr=='X'){chr=23}
+  qcObj <- qc(coverageObj[[chr]]$Y, 
+              bambedObj$sampname, 
+              bambedObj$chr, 
+              bambedObj$ref, 
+              mapp, 
+              gc, 
+              cov_thresh = c(20, 4000),
+              length_thresh = c(20, 2000), 
+              mapp_thresh = 0.9, 
+              gc_thresh = c(20, 80)
+  )
+  
+  Y_qc =qcObj$Y_qc; sampname_qc =qcObj$sampname_qc; gc_qc = qcObj$gc_qc
+  mapp_qc =qcObj$mapp_qc; ref_qc =qcObj$ref_qc; 
+  qcmat =qcObj$qcmat
+ # write.table(qcmat, file = paste0( bambedObj$projectname, '_',  bambedObj$chr,'_qcmat', '.txt'),sep="\t",quote=FALSE,row.names=FALSE)
+  
+  # If the WES is designed under case-control setting, CODEX estimates the exon-wise Poisson latent factor
+  #using only the read depths in the control cohort, and then computes the sample-wise latent factor terms for
+  #the case samples by regression. normal_index specifies the indices of normal samples and the normalization
+  #function to use under this setting is normalize2
+  
+  #  use the following if we have normal/controls samples
+ # normObj <- normalize2(Y_qc, gc_qc, K = 1:2, normal_index=grep("^NA128",sampnames))
+  
+  # No controls samples ID'ng
+  normObj <- normalize(Y_qc, gc_qc, K = 1:2)
+  #save.iamge("normalize.RData")
+  Yhat = normObj$Yhat
+  AIC <- normObj$AIC
+  BIC <- normObj$BIC
+  RSS=normObj$RSS
+  K=normObj$K
+  
+  
+  
+  #choiceofK(AIC, BIC, RSS, K, filename = paste0(bambedObj$projectname, "_", bambedObj$chr,
+                                                #"_choiceofK", ".pdf"))
+  optK = K[which.max(BIC)]
+  
+  # for germline used mode integer
+  # for somatic CNV use fraction
+  #finalcall = segment(Y_qc, Yhat, optK = optK, K = K, sampname_qc,ref_qc, bambedObj$chr, lmax = 200, mode = "fraction")
+
+  finalcall <- segment(Y_qc, Yhat, optK = optK, K = 1:optK, sampname_qc,
+                     ref_qc, chr, lmax = 200, mode = "fraction") 
+
+head(finalcall)
+# generate all CNV segments including copy number neutral region.
+finalcall.all=finalcall[,1:11]
+finalcall.temp_list=list()
+for(sampi in sampname_qc){
+  if(length(which(finalcall[,1]==sampi))==0){
+    finalcall.temp=c(sampi,chr,'neutral',start(ref_qc)[1],end(ref_qc)[length(ref_qc)],
+                     round((end(ref_qc)[length(ref_qc)]-start(ref_qc)[1]+1)/1000,3),1,
+                     length(ref_qc),sum(Y_qc[,which(sampname_qc==sampi)]),
+                     sum(Yhat[[optK]][,which(sampname_qc==sampi)]),
+                     round(2*sum(Y_qc[,which(sampname_qc==sampi)])/sum(Yhat[[optK]][,which(sampname_qc==sampi)]),3))
+    finalcall.temp=t(as.matrix(finalcall.temp))
+    finalcall.all=rbind(finalcall.all,finalcall.temp)
+  } else{
+    cn.index=which(finalcall[,1]==sampi)
+    st.temp=c(1,as.numeric(finalcall[cn.index,'ed_exon'])+1)
+    st.temp[st.temp > length(ref_qc)] = length(ref_qc)
+    ed.temp=c(as.numeric(finalcall[cn.index,'st_exon'])-1,length(ref_qc))
+    ed.temp[ed.temp < 1] = 1
+    for(t in 1:length(st.temp)){
+      finalcall.temp=c(sampi,chr,'neutral',start(ref_qc)[st.temp[t]],end(ref_qc)[ed.temp[t]],
+                       round((end(ref_qc)[ed.temp[t]]-start(ref_qc)[st.temp[t]]+1)/1000,3),
+                       st.temp[t],ed.temp[t],sum(Y_qc[(st.temp[t]):(ed.temp[t]),which(sampname_qc==sampi)]),
+                       sum(Yhat[[optK]][(st.temp[t]):(ed.temp[t]),which(sampname_qc==sampi)]),
+                       round(2*sum(Y_qc[(st.temp[t]):(ed.temp[t]),which(sampname_qc==sampi)])/sum(Yhat[[optK]][(st.temp[t]):(ed.temp[t]),which(sampname_qc==sampi)]),3))
+      
+      finalcall.temp=as.data.frame(t(as.matrix(finalcall.temp)))
+      finalcall.temp<-as.data.frame( finalcall.temp)
+      names(finalcall.temp)<-names(finalcall.all)
+      finalcall.all=as.data.frame(rbind(finalcall.all,finalcall.temp))
+      #finalcall.temp_list[[sampi]]<-finalcall.temp
+    }
+  }
+}
+
+finalcall.all=finalcall.all[order(finalcall.all[,1],as.numeric(finalcall.all[,'st_bp'])),]
+
+
+ finalcall.all =as.data.frame(finalcall.all)
+  finalcall.all=split(finalcall.all, f=finalcall.all$sample_name)
+  save(finalcall.all,file=paste("/rcecloud/lmotlhabi/bsub_scripts/DA0000085/CNV_Callers/Codex/chr",chr,"_PlusNeutralCNVs_finalcall.rda",sep=""))
+}
+```
+
+
+
+
+```{r GetAllfinalCall}
+finalCalls<-list.files(pattern="PlusNeutralCNVs")
+finalcall_neutral_list<-list()
+chromosomes<-sub("_PlusNeutralCNVs_finalcall.rda","",finalCalls)
+for(i in seq_along(chromosomes)){
+  #load(paste("RData",finalCalls[i],sep="/"))
+  load(finalCalls[i])
+  finalcall_neutral_list[[i]]<-finalcall.all
+  names(finalcall_neutral_list)[i]<-chromosomes[i]
+   }
+save(finalcall_neutral_list,file="Codex_plusNeutralCNVs_finalcall2_list.RData")
+```
+

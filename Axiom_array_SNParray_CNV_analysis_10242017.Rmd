@@ -1,0 +1,804 @@
+---
+title: "Axiom_Array_Processing_Analysis"
+author: "Lala M Motlhabi"
+date: "10/24/2017"
+output: html_document
+---
+```{r loadLibs}
+library(rtracklayer)
+library(reshape2)
+library(GGally)
+library(DT)
+library(plotly)
+library(ggplot2)
+library(VariantAnnotation)
+library(parallel)
+library(GenomicRanges)
+library(ggplot2)
+library(gplots)
+library(plotly)
+library(VennDiagram)
+#source("http://www.bioconductor.org/biocLite.R")
+#biocLite("AnnotationHub")
+library(AnnotationHub)
+library(Rsamtools)
+```
+
+Ref: https://genome.cshlp.org/content/17/11/1665.short
+
+INSTALLATION FROM BINARY DISTRIBUTIONS
+======================================
+
+LINUX/OS X:
+-----------
+If installing from a binary distribution, copy the files to a dir on your $PATH or add the bin directory to your path:
+
+
+docker image: lala/ubuntuapt : "./bin/Ubuntu_APTtools" - APtools
+docker image: romanhaa/penncnv  - PENN_CNV
+
+```{bash Install_APT}
+
+ export PATH=apt-1.20.5/bin:$PATH
+
+```
+
+the Axiom PMRA offers a genome-wide imputation grid
+from Phase III of the 1000 Genomes Project and from the
+NHGRI-EBI GWAS catalog published as of May 2016
+REF: https://assets.thermofisher.com/TFS-Assets/GSD/Datasheets/axiom-pmra-data-sheet.pdf
+
+```{r}
+library(DT)
+tble<-read.csv("Axiom_PMRA.Markers.csv", header=T, stringsAsFactors = F)
+DT::datatable(tble)
+
+```
+
+The goal of the Best
+Practice Genotyping Analysis Work
+flow in the Data Analysis Guide is to identify and remove poor quality
+samples in order to generate well-clustered SNPs for downstream analysis. A detailed description of the Best
+
+
+```{bash Step1_GroupSamples}
+(echo cel_files; \ls -1 CEL_files/*.CEL) > cel_list1.txt
+
+
+```
+#Best Practices Step 2: Generate the Sample “DQC” Values Using APT
+#DQC values are produced by the program apt-geno-qc. Below is an example script for a Linux command line shell.
+Analysis files were downloaded together in the same directory called <Axiom_Analysis_Files>.
+#Example apt-geno-qc script for step 2 of the best practice analysis workflow  
+
+```{bash step2_sampleDQC}
+
+/apt-1.20.6-x86_64-intel-linux/bin/apt-geno-qc \
+--analysis-files-path Axiom_Analysis_Files \
+--xml-file Axiom_Analysis_Files/Axiom_PMRA.r2.apt-geno-qc.AxiomQC1.xml \
+--cel-files cel_list1.txt \
+--out-file apt-geno-qc.txt\
+--log-file apt-geno-qc.log
+```
+
+STEP_3: conduct SampleQC on DQC
+Remove samples with a DQC value less than the default DQC threshold of 0.82. 
+To execute this filter step, refer to the column “axiom_dishqc_DQC” in the file <OUTDIR>/apt-geno-qc.txt (produced by step 2 of the best practice analysis workflow).
+74 AxiomTM Genotyping Solution
+When executing the workflow with the APT system (GTC automates this step), the user must write a script to remove .CELs from the <OUTDIR>/cel_list1.txt with DQC values that are < 0.82. We will refer to filtered .CEL list from this step as cel_list2.txt.
+
+
+```{r createFilteredCELlist, include=FALSE}
+
+tab1<-read.table("cel_list1.txt",header=T)
+qc_text<-read.table("apt-geno-qc.txt--log-file",header=T)
+summary(qc_text$axiom_dishqc_DQC)
+# all samples passed DQC threshold 0f 82
+#Min. 1st Qu.  Median    Mean 3rd Qu.    Max. \# 0.8545  0.9462  0.9533  0.9500  0.9612  0.9769
+knitr::opts_chunk$set(echo = TRUE)
+```
+Best Practices Step 4: Generate Sample QC Call Rates Using APT
+
+Choose <axiom_array>_LessThan96_Step1.r<#>.apt-genotype-axiom.AxiomGT1.apt2.xml to perform QC genotyping with SNP specific models if batch size is less than 96 samples.
+
+Genotype calls are produced by the program apt-axiom-genotype. Below is an example script for a Linux command line shell. In this and other example scripts with APT programs, we assume that the analysis files were downloaded together into the same directory called <ANALYSIS_FILES_DIR>.
+Example apt-genotype-axiom script for step 4 of the best practice analysis workflow using APT
+The generation of “cel_list2.txt” is discussed in step 3. Note:
+Choose <axiom_array>_LessThan96_Step1.r<#>.apt-genotype-axiom.AxiomGT1.apt2.xml to perform QC genotyping with SNP specific models if batch size is less than 96 samples.
+```{bash step4_SampleQC Call rates}
+
+../bin/apt-genotype-axiom \
+--log-file <OUTDIR>/apt-genotype-axiom.log \
+--xml-file <ANALYSIS_FILES_DIR>/<axiom_array>_96orMore_Step1.r<#>.apt-genotype-
+axiom.AxiomGT1.apt2.xml \
+--analysis-files-path <ANALYSIS_FILES_DIR> \
+--out-dir <OUTDIR> \
+--cel-files <OUTDIR>/cel_list2.txt
+
+```
+
+#%affymetrix-algorithm-param-apt-command-line=apt-genotype-axiom --analysis-files-path /nfs/falcon/lib/release/Axiom_PMRA.r2/
+--arg-file /nfs/falcon/lib/release/Axiom_PMRA.r2/Axiom_PMRA_96orMore_Step2.r2.apt-genotype-axiom.AxiomGT1.apt2.xml 
+--out-dir /nfs/da-data/PRO100019_S1700278_SAX/DA/cat_check/cluster_all/genotype-inliers/ 
+--log-file /nfs/da-data/PRO100019_S1700278_SAX/DA/cat_check/cluster_all/genotype-inliers/apt-genotype-axiom.log --dual-channel-normalization true --cel-files /nfs/da-data/PRO100019_S1700278_SAX/DA/cat_check/cluster_all/cel_list_inliers.txt --allele-summaries true --snp-posteriors-output true --igender-female-threshold 0.7 --probeset-ids /nfs/falcon/lib/release/Axiom_PMRA.r2/Axiom_PMRA.r2.step2.ps --batch-folder /nfs/da-data/PRO100019_S1700278_SAX/DA/cat_check/cluster_all/genotype-inliers/suitefiles/
+
+Remove samples with a QC call rate value less than the default threshold of 97%. To execute this filter step, refer to the column “call_rate” in the file “<OUTDIR>/ AxiomGT1.report.txt” produced by step 4. When executing the workflow with APT (GTC automates this step), the user must write a script to remove .CELs from the <OUTDIR>/cel_list2.txt whose call rate values are less than 97%. We will refer to this .CEL list as cel_list3.txt. Note that the AxiomGT1.report.txt file will have a number of header lines beginning with #. The file can be read directly into a table (data.frame) using the R “read.table” function, which ignores lines beginning with #.
+
+```{bash step5_SampleQCcallRates}
+/apt-1.20.6-x86_64-intel-linux/bin/apt-genotype-axiom  \
+--log-file apt-genotype-axiom.log --dual-channel-normalization true \
+--arg-file Axiom_Analysis_Files/Axiom_PMRA_96orMore_Step2.r2.apt-genotype-axiom.AxiomGT1.apt2.xml \
+--analysis-files-path Axiom_Analysis_Files \
+--out-dir /home/lmotlhabi/bsub_scripts/DA0000085/Axiom_Arrays \
+--cel-files /home/lmotlhabi/bsub_scripts/DA0000085/Axiom_Arrays/cel_list1.txt --allele-summaries true --snp-posteriors-output true \
+--igender-female-threshold 0.7 --probeset-ids  Axiom_Analysis_Files/Axiom_PMRA.r2.step2.ps \
+
+```
+
+Best Practices Step 6: QC the Plates
+In this section we provide instructions for computing the basic plate QC metrics and guidelines for identifying plates to remove from the analysis.
+Note that the user must write a script or use EXCEL to compute the plate QC metrics.
+Group the .CEL files by plate, then for each plate:
+Compute plate pass rate
+Compute the average call rate of passing samples on the plate
+ Remove the samples that failed the sample QC tests in steps 3 and 5
+ Compute the average call rate of the remaining samples for the given plate
+ Guidelines for passing plates in:
+plate pass rate ==() (sample passing DQC and 97% call rate)/Total samples on the plate)* 100
+
+```{r step6_PlatesPassRate}
+plate_list=list()
+test<-read.table("AxiomGT1.report.txt", header=T, stringsAsFactors = F)
+ head(test)
+ 
+ plate<-grep("A[0-9][0-9]",test$cel_files)
+ 
+
+```
+
+Best Practices Step 7: Genotype Passing Samples and Plates Using AxiomGT1.Step2
+Step 7 produces genotype calls for all SNPs and passing samples. Genotype calls are produced by the program 
+pt-genotype-axiom. Below is an example script for a Linux command line shell. 
+In this and other example scripts with APT programs, we assume that the analysis files were downloaded together into the same directory called <ANALYSIS_FILES_DIR>.
+
+
+<axiom_array>_96orMore_Step2.r<#>.apt-axiom-genotype.AxiomGT1.apt2.xml whereas the example script for step 4 executes:
+<axiom_array>_96orMore_Step1.r<#>.apt-axiom-genotype.AxiomGT1.apt2.xml The step 7 genotyping script includes options to write out a number of files to <OUTDIR>. The default files are:
+AxiomGT1.calls.txt which contains the genotype calls (coded into 0, 1, 2 and -1) for each probe set and sample.
+AxiomGT1.confidences.txt, which contains the confidence score (described in What is a SNP Cluster Plot for AxiomGT1 Genotypes?) for each genotype call in the AxiomGT1.calls.txt file.
+AxiomGT1.report.txt, which contains information about each sample.
+
+NOTE: The output is per probe set, not per SNP. A probe set is a set of probe sequences interrogating a SNP site. 
+Although most SNP sites are interrogated by only one probe set (and therefore there is usually a one-to-one correspondence 
+between probe set and SNP site), some SNP sites are interrogated by more than one probe set.
+The example script also includes options for additional output files. The posteriors and summary file must be created for use in Step 8.
+ The AxiomGT1.snp-posteriors.txt file is enabled by --write-models option and includes the location and variance of the genotype clusters per probe set.
+76 AxiomTM Genotyping Solution
+ The AxiomGT1.summary.txt file is enabled by --summaries option and includes the summarized intensity for the A and B allele of each probe set and sample.
+ CHP files - one for each sample - are enabled by the -cc-chp-output option.
+Note: Choose <axiom_array>_LessThan96_Step2.r<#>.apt-genotype-axiom.AxiomGT1.apt2.xml to perform genotyping with SNP-specific models if batch size is less than 96 samples.
+
+4 output files required for subsequent steps
+AxiomGT1.calls.txt – genotype calls
+AxiomGT1.confidences.txt – confidences for the genotype calls
+AxiomGT1.report.txt – summaries for the samples analyzed including the computed gender, call rate and heterozygosity
+AxiomGT1.summary.txt – normalized intensities of A and B alleles
+
+```{bash step7_Genotype calls}
+/apt-1.20.6-x86_64-intel-linux/bin/apt-genotype-axiom  \
+--log-file apt-genotype-axiom.log --dual-channel-normalization true \
+--arg-file Axiom_Analysis_Files/Axiom_PMRA_96orMore_Step2.r2.apt-genotype-axiom.AxiomGT1.apt2.xml \
+--analysis-files-path Axiom_Analysis_Files \
+--out-dir /home/lmotlhabi/bsub_scripts/DA0000085/Axiom_Arrays \
+--cel-files /home/lmotlhabi/bsub_scripts/DA0000085/Axiom_Arrays/cel_list1.txt --allele-summaries true --snp-posteriors-output true \
+--igender-female-threshold 0.7 --probeset-ids  Axiom_Analysis_Files/Axiom_PMRA.r2.step2.ps \
+
+```
+
+Best Practices Step 8A: Run Ps-Metrics
+ps-metrics uses two output files from Best Practices Step 7 (AxiomGT1.Step2 above) as inputs:
+AxiomGT1.posteriors.txt and AxiomGT1.calls.txt. Additionally, ps-metrics will calculate the metrics 
+on only a subset of probe sets if a list of desired probe sets is supplied. See the SNPolisher User 
+Guide for a longer example of running the SNPolisher functions.
+To run ps-metrics on posterior and calls files in directory ./input and generate output file metrics.txt:
+
+The output from Ps-Metrics (the default name is “metrics.txt”) is a text file containing the SNP QC metrics.
+
+```{bash step8_RunPSMetrics}
+/apt-1.20.6-x86_64-intel-linux/bin/ps-metrics --posterior-file AxiomGT1.snp-posteriors.txt \
+--call-file AxiomGT1.calls.txt \
+--metrics-file metrics.txt 
+
+
+```
+
+Best Practices Step 8B: Run Ps_Classification
+One the Ps-Metrics function has been run and the SNP QC metrics generated and output to metrics.txt, the SNPs can be classified using Ps-Classification. 
+Ps-Classification has three required arguments and 15 optional arguments. The three required arguments are:
+1. the name and location of the output metrics file from Ps-Metrics,
+2. the location of the preferred output directory, and
+AxiomTM Genotyping Solution 77
+3. the species (or genome) type: human, non-human diploid, or polyploid.
+A 4th argument: ps2snpFile is needed for arrays that includes SNPs that are interrogated with more than one probe set. This file, <axiom_array>.r<#>.ps2snp_map.ps,
+should be provided with the Analysis Library Files for the array (Table 1.1). If this file has not been provided, users should contact their local Field Application 
+Support or send email to Support@Thermo Fisher.com.
+
+Below is an APT command example for Ps-Classification which:
+1. uses output from Ps-Metrics metrics results in metric.txt,
+2. the classification results should be stored in the folder called Output,
+3. the genotype data is human
+4. ps2snp.txt file = <ANALYSIS_FILES_DIR>/Axiom_BioBank1.r2.ps2snp_map.ps. <ANALYSIS_FILES_DIR> means the full path to the Analysis Library file directory.
+
+```{bash Step8_RunPs_Classification}
+
+/apt-1.20.6-x86_64-intel-linux/bin/ps-classification \
+--species-type human \
+--metrics-file ./output/metrics.txt \
+--output-dir ./output \
+--ps2snp-file Axiom_Analysis_Files/Axiom_PMRA.r2.ps2snp_map.ps
+
+```
+
+```{r SNPolisher}
+source("/PROGRAMS")
+install.packages("PROGRAMS/SNPolisher_package/SNPolisher_1.5.2.tar.gz",repos=NULL,type="source")
+
+library("SNPolisher")
+
+# Ps_Metrics calculates various QC metrics
+Ps_Metrics(posteriorFile="AxiomGT1.snp-posteriors.txt",callFile="AxiomGT1.calls.txt",output.metricsFile="Output/metrics.txt")
+
+
+```
+
+#### Ps_classification
+
+
+
+```{r Ps_classification, echo=FALSE}
+ #ps2snp.txt file = <ANALYSIS_FILES_DIR>/Axiom_BioBank1.r2.ps2snp_map.ps. <ANALYSIS_FILES_DIR> means the full path to the Analysis Library file directory
+
+Ps_Classification(metricsFile="output/metrics.txt", ps2snpFile="Axiom_Analysis_Files/Axiom_PMRA.r2.ps2snp_map.ps",output.dir="Output", SpeciesType="human", GTC=FALSE, output.recommended=TRUE)
+
+ps.performance <- read.table("output/Ps.performance.txt",header=T)
+ps.performance[1:5,]
+ps.performance[1:5,c(1:2,16:17)]
+
+# pulling out SNPs for PolyHighRes and MonoHighRes
+ps.performance$ConversionType[1:5]
+ps.performance[1:5,16]
+
+names(ps.performance)
+unique(ps.performance$ConversionType)
+
+recommended <- ps.performance[ps.performance$ConversionType%in%c("PolyHighResolution","MonoHighResolution"),1]
+recommended[1:5]
+write.table(recommended, file="Output/recommended.txt",sep="\t",row.names=FALSE,col.names="probeset_id",quote=FALSE)
+
+
+```
+
+Ps_Visualization
+```{r  Ps_Visualization}
+# Ps_Visualization
+dir.create("output/temp")
+sample_file1<-read.table("cel_list1.txt", header=T, stringsAsFactors=F)
+sample_file1$sample<-sample_file1$cel_files
+sample_file1$sample<-sub("CEL_files/","",sample_file1$sample)
+sample_file1$group<-sample_file1$sample
+
+sample_file1$group<-sub(".*_","",sample_file1$group)
+sample_file1$group<-sub(".CEL","",sample_file1$group)
+sample_file1$color<-sample_file1$group
+sample_file1$color<-sub("[0-9].*","",sample_file1$color)
+cols<-c("coral4","cornsilk4","cyan4","darkgoldenrod4","darkorchid","hotpink","moccasin")
+for(i in seq_along(cols)){
+  a<-grep(unique(sample_file1$color)[i],sample_file1$color)
+  sample_file1$color[c(a)]<-cols[i]
+  }
+sample_file1<-sample_file1[,c(2,4)]
+sample_only<-sample_file1$sample
+
+
+write.table(sample_file1,file="sample_file1.txt", sep="\t",col.names = TRUE, row.names=F,quote = FALSE)
+write.table(sample_only,file="sample_only.txt", sep="\t",col.names = TRUE, row.names=F,quote = FALSE)
+Ps_Visualization(pidFile="output/PolyHighResolution.ps", output.pdfFile="output/Cluster_PolyHighResolution.pdf", summaryFile="AxiomGT1.summary.txt", callFile="AxiomGT1.calls.txt", posteriorFile="AxiomGT1.snp-posteriors.txt", temp.dir="output/Temp", keep.temp.dir=FALSE,  plot.prior=T, match.cel.file.name=TRUE, max.num.SNP.draw=6)
+
+# using the gzipped files
+Ps_Visualization(pidFile="output/PolyHighResolution.ps", output.pdfFile="output/Cluster_PolyHighResolution.pdf", summaryFile="AxiomGT1.summary.txt.gz", callFile="AxiomGT1.calls.txt.gz", posteriorFile="AxiomGT1.snp-posteriors.txt.gz", temp.dir="output/Temp", keep.temp.dir=FALSE,  refFile="ref.txt", plot.prior=T, match.cel.file.name=TRUE, max.num.SNP.draw=6)
+
+# changing colors
+Ps_Visualization(pidFile="output/PolyHighResolution.ps", output.pdfFile="output/Cluster_PolyHighResolution_blue.pdf", summaryFile="AxiomGT1.summary.txt", callFile="AxiomGT1.calls.txt", posteriorFile="AxiomGT1.snp-posteriors.txt", temp.dir="output/Temp", keep.temp.dir=FALSE,  plot.prior=T, match.cel.file.name=TRUE, max.num.SNP.draw=6,geno.col=c("red","dodgerblue2","blue","gray","cyan","green", "darkgreen","purple"))
+
+# changing the prior oval color
+Ps_Visualization(pidFile="output/PolyHighResolution.ps", output.pdfFile="output/Cluster_PolyHighResolution_blue_prior.pdf", summaryFile="AxiomGT1.summary.txt", callFile="AxiomGT1.calls.txt", posteriorFile="AxiomGT1.snp-posteriors.txt", temp.dir="output/Temp", keep.temp.dir=FALSE, plot.prior=T, col.prior="green", match.cel.file.name=TRUE, max.num.SNP.draw=6,geno.col=c("red","dodgerblue2","blue","gray","cyan","green", "darkgreen","purple"))
+
+# highlighting samples, no reference genotypes
+Ps_Visualization(pidFile="output/PolyHighResolution.ps", output.pdfFile="output/Cluster_PolyHighResolution_highlight.pdf", summaryFile="AxiomGT1.summary.txt", callFile="AxiomGT1.calls.txt", posteriorFile="AxiomGT1.snp-posteriors.txt", temp.dir="output/Temp", keep.temp.dir=FALSE, plot.prior=T, match.cel.file.name=TRUE, max.num.SNP.draw=6,geno.col=c("red","dodgerblue2","blue","gray","cyan","green", "darkgreen","purple"),sampFile="sample_file1.txt")
+
+# highlighting samples, without reference genotypes
+Ps_Visualization(pidFile="output/PolyHighResolution.ps", output.pdfFile="output/Cluster_PolyHighResolution_highlight_no_ref.pdf", summaryFile="AxiomGT1.summary.txt", callFile="AxiomGT1.calls.txt", posteriorFile="AxiomGT1.snp-posteriors.txt", temp.dir="output/Temp", keep.temp.dir=FALSE, plot.prior=T, plot.ref=F, match.cel.file.name=TRUE, max.num.SNP.draw=6,geno.col=c("red","dodgerblue2","blue","gray","cyan","green", "darkgreen","purple"),sampFile="sample_only.txt")
+
+# highlighting samples in multiple colors, without reference genotypes
+Ps_Visualization(pidFile="output/PolyHighResolution.ps", output.pdfFile="output/Cluster_PolyHighResolution_highlight_no_ref_2.pdf", summaryFile="AxiomGT1.summary.txt", callFile="AxiomGT1.calls.txt", posteriorFile="AxiomGT1.snp-posteriors.txt", temp.dir="output/Temp", keep.temp.dir=FALSE, plot.prior=T, plot.ref=F, match.cel.file.name=TRUE, max.num.SNP.draw=6,geno.col=c("red","dodgerblue2","blue","gray","cyan","green", "darkgreen","purple"),sampFile="sample_list_2.txt")
+
+# highlighting samples in multiple colors, without reference genotypes, with labels
+Ps_Visualization(pidFile="output/PolyHighResolution.ps", output.pdfFile="output/Cluster_PolyHighResolution_highlight_no_ref_labels.pdf", summaryFile="AxiomGT1.summary.txt", callFile="AxiomGT1.calls.txt", posteriorFile="AxiomGT1.snp-posteriors.txt", temp.dir="output/Temp", keep.temp.dir=FALSE, plot.prior=T, plot.ref=F, match.cel.file.name=TRUE, max.num.SNP.draw=6,geno.col=c("red","dodgerblue2","blue","gray","cyan","green", "darkgreen","purple"),sampFile="sample_list_2.txt", labelsFile="labels.txt")
+
+# coloring by confidences instead of by calls
+Ps_Visualization(pidFile="output/PolyHighResolution.ps", output.pdfFile="output/Cluster_PolyHighResolution_confs_1.pdf", summaryFile="AxiomGT1.summary.txt", callFile="AxiomGT1.calls.txt", confidenceFile="AxiomGT1.confidences.txt", posteriorFile="AxiomGT1.snp-posteriors.txt", temp.dir="output/Temp", keep.temp.dir=FALSE,  refFile="ref.txt", plot.prior=T, match.cel.file.name=TRUE, max.num.SNP.draw=6, plot.confs=TRUE, plot.calls=FALSE)
+
+# deciding what confidence values to use
+confs <- read.table("AxiomGT1.confidences.txt",header=T)
+PHR <- read.table("output/PolyHighResolution.ps",header=T)
+sum(confs[,1]%in%PHR[,1])
+confs <- confs[confs[,1]%in%PHR[,1],]
+quantile(unlist(confs[,2:dim(confs)[2]]))
+
+
+# coloring by confidences and by calls
+Ps_Visualization(pidFile="output/PolyHighResolution.ps", output.pdfFile="output/Cluster_PolyHighResolution_confs_2.pdf", summaryFile="AxiomGT1.summary.txt", callFile="AxiomGT1.calls.txt", confidenceFile="AxiomGT1.confidences.txt", posteriorFile="AxiomGT1.snp-posteriors.txt", temp.dir="output/Temp", keep.temp.dir=FALSE,  plot.ref=FALSE, plot.prior=T, match.cel.file.name=TRUE, max.num.SNP.draw=6, col.prior="darkblue", col.posterior="skyblue", plot.confs=TRUE, confs.thresh=c(0,1e-05,2e-05,3e-05,1))
+
+# coloring by confidences and by calls without intensities
+Ps_Visualization(pidFile="output/PolyHighResolution.ps", output.pdfFile="output/Cluster_PolyHighResolution_confs_3.pdf", summaryFile="AxiomGT1.summary.txt", callFile="AxiomGT1.calls.txt", confidenceFile="AxiomGT1.confidences.txt", posteriorFile="AxiomGT1.snp-posteriors.txt", temp.dir="output/Temp", keep.temp.dir=FALSE,  plot.ref=FALSE, plot.prior=T, match.cel.file.name=TRUE, max.num.SNP.draw=6, col.prior="darkblue", col.posterior="skyblue", plot.intensity=FALSE, plot.confs=TRUE, confs.thresh=c(0,1e-05,2e-05,3e-05,1))
+
+# coloring by confidences without intensities
+Ps_Visualization(pidFile="output/PolyHighResolution.ps", output.pdfFile="output/Cluster_PolyHighResolution_confs_4.pdf", summaryFile="AxiomGT1.summary.txt", callFile="AxiomGT1.calls.txt", confidenceFile="AxiomGT1.confidences.txt", posteriorFile="AxiomGT1.snp-posteriors.txt", temp.dir="output/Temp", keep.temp.dir=FALSE,  plot.ref=FALSE, plot.prior=T, match.cel.file.name=TRUE, max.num.SNP.draw=6, col.prior="darkblue", col.posterior="skyblue", plot.intensity=FALSE, plot.confs=TRUE, plot.calls=FALSE, confs.thresh=c(0,1e-05,2e-05,3e-05,1))
+
+```
+
+## TO DO CNV_Calls : PennCNV -affy (http://penncnv.openbioinformatics.org/en/latest/user-guide/affy/).
+```{r getSexfile}
+sam<-read.table("sample_file1.txt",header=T,stringsAsFactors = F)
+sam$Best.Array<-sam$sample
+sam$Best.Array<-sub(".CEL","",sam$Best.Array )
+Vsam<-read.csv("Sample_info_files.csv",header=T, stringsAsFactors =F )
+allSam<-merge(sam,Vsam,by="Best.Array")
+allSam$Inferred.Gender[31] <-"Female"
+sexfile<-allSam[,c(2,18)]
+sexfile$Inferred.Gender<-sub("F","f",sexfile$Inferred.Gender)
+sexfile$Inferred.Gender<-sub("^Male","male",sexfile$Inferred.Gender)
+#control File
+conts<-grep("Control",allSam$Sample.Type)
+controlfiles<-allSam[conts,c(2,8)]
+write.table(sexfile,file="sexfile.txt", sep="\t",col.names = F, row.names=F,quote = FALSE)
+write.table(controlfiles,file="controlsfile.txt", sep="\t",col.names = F, row.names=F,quote = FALSE)
+
+
+#Get Location files
+library(rtracklayer)
+
+bed<-import("Axiom_PMRA.na35.bed", format="bed")
+
+dat_bed<-as.data.frame(bed)
+
+dat_bed<-dat_bed[,c(6,1,2:5,7)]
+
+write.table(dat_bed,file="mapfile.txt", sep="\t",col.names = F, row.names=F,quote = FALSE)
+
+```
+
+
+generate canonical genotype clustering files from the above files, e.g.:
+/generate_affy_geno_cluster.pl AxiomGT1.calls.txt AxiomGT1.confidences.txt AxiomGT1.summary.txt --nopower2 -locfile mapfile.dat -sexfile sex_batch1.txt -out batch1.genocluster
+Difference between Log R and Log R Ratio
+
+These are different terms with some similarity. The word "Log R" or "Log2 R" is typically used in most array-CGH studies and Affymetrix CNV studies. For a given SNPs it is calculated as: (1) first do quantile normalization so that arrays are comparable to each other in terms of raw signal intensity distributions (2) next take the signal intensity for A allele and B allele and sum them together for each sample, then find the median across all samples (3) for a given sample, divide the sum of A+B allele intensity by the median value find in the previous step, then take a logarithm, to derive the Log R value.
+The term "Log R Ratio" was originally proposed as an Illumina's signal intensity measure, together with the "B Allele Frequency" term which is even more confusing. The basic idea is that A and B allele should have different signal intensity measures due to differences in binding affinity (Affymetrix) or likelihood of single-base extension (Illumina). So by finding the signal intensity cluster of AA, AB and BB genotypes across a large group of samples, one can predict the expected intensity, given the observed allelic intensity ratio (that is, given the genotype in a probablistic manner). Then just divide the observed A+B signal intensity data by this expected value, then take a logarithm, we will get Log R Ratio. The PennCNV algorithm and its extension to the Affymetrix array use the "Log R Ratio" measure, not the Log R measure, which is used by pretty much every other software out there.
+ 
+ 
+NEXT:
+As the signal intensity values had not been log2 normalized, the –nopower2 argument was used. We are grateful to Dr Wang for suggesting this solution.
+Next, we calculated Log R Ratio (LRR) and B-Allele Frequency (BAF) values using the normalize_affy_geno_cluster.pl command, e.g.:
+```{bash GetGenotypeClustering_files}
+#root/PennCNV-1.0.3/gw6/bin/generate_affy_geno_cluster.pl
+/root/PennCNV-1.0.3/gw6/bin/generate_affy_geno_cluster.pl AxiomGT1.calls.txt AxiomGT1.confidences.txt AxiomGT1.summary.txt  -locfile mapfile.txt --nopower2 -sexfile sexfile.txt -out batch1.genocluster
+
+WARNING: A total of 220 markers do not have chromosome annotation in locfile mapfile.txt and were skipped
+WARNING: A total of 20 markers have complete genotyping failure (no genotype calls pass the confidence score threshold) and were skipped
+WARNING: A total of 257937 markers do not have at least two types of genotypes (out of AA, AB, BB) and were skipped
+WARNING: A total of 75 markers have abnormal thetamean patterns (mean theta value for AA, AB and BB cluster) and were skipped
+NOTICE: A total of 644308 SNP markers have been analyzed to construct canonical clustering positions
+NOTICE: A total of 0 CN markers have been analyzed to construct canonical clustering positions
+
+#vendors Processed outputs
+
+WARNING: A total of 220 markers do not have chromosome annotation in locfile ../mapfile.txt and were skipped
+WARNING: A total of 30 markers have complete genotyping failure (no genotype calls pass the confidence score threshold) and were skipped
+WARNING: A total of 266730 markers do not have at least two types of genotypes (out of AA, AB, BB) and were skipped
+WARNING: A total of 77 markers have abnormal thetamean patterns (mean theta value for AA, AB and BB cluster) and were skipped
+NOTICE: A total of 635503 SNP markers have been analyzed to construct canonical clustering positions
+NOTICE: A total of 0 CN markers have been analyzed to construct canonical clustering positions
+
+```
+
+This step use the allele-specific signal intensity measures generated from the last step to calculate the Log R Ratio (LRR) values and the B Allele Frequency (BAF) values for each marker in each individual. 
+
+The location file specifies the chromosome position of each SNP or CN probe, and this information is printed in the output files as well to facilitate future data processing.
+```{bash NormalizeGenoCluster_files}
+/root/PennCNV-1.0.3/gw6/bin/normalize_affy_geno_cluster.pl batch1.genocluster AxiomGT1.summary.txt -nopower2 -locfile mapfile.txt -out batch1_lrr_baf.txt
+
+
+NOTICE: Finished writting to batch1_lrr_baf.txt with 644308 LRR and BAF values
+WARNING: A total of 258252 markers do not have cluster information and were skipped
+
+#Vendor Processed Outputs
+/root/PennCNV-1.0.3/gw6/bin/normalize_affy_geno_cluster.pl batch1.genocluster AxiomGT1.summary.txt -nopower2 -locfile ../mapfile.txt -out batch1_lrr_baf.txt
+
+
+NOTICE: Finished writting to batch1_lrr_baf.txt with 635503 LRR and BAF values
+WARNING: A total of 267057 markers do not have cluster information and were skipped
+
+```
+
+Step 2: Split the signal file into individual files for CNV calling by PennCNV
+
+(http://penncnv.openbioinformatics.org/en/latest/user-guide/affy/).
+
+we split the signal files into individual files for CNV calling by PennCNV and then detected the raw CNV calls. We created pfb and gcmodel files from existing data and “trained” a .hmm file on 100 Axiom samples, using the available Affy 6.0 hmm file as a template.
+
+
+After this file(batch1_lrr_baf.txt) is generated, we need to split this huge file into individual signal intensity files (one for each subject), then we can follow the procedures outlined in the PennCNV tutorial, and generate the CNV calls using a similar procedure as for Illumina arrays. The only difference is that the HMM file (gw6.hmm) and the PFB file (affygw6.hg18.pfb and affygw5.hg18.pfb) should be used for Affymetrix CNV calling. Several basic steps are briefly described below:
+
+
+
+Use the kcolumn.pl program to split the gw6.lrr_baf.txt file, the split 2 argument should be used, since every two columns (Log R Ratio and B Allele Frequency) should be in each output file. An example is given below:
+```{r EditChr}
+baf<-read.table("batch1_lrr_baf.txt",header=T,sep="\t",stringsAsFactors = F)
+write.table(pfb,file="gw6list.baf.txt", sep="\t", row.names=F,quote = FALSE)
+
+#Vendor Processed
+baf<-read.table("Vendors_Processed_files/batch1_lrr_baf.txt",header=T,sep="\t",stringsAsFactors = F)
+write.table(pfb,file="gw6list.pfb.txt", sep="\t", row.names=F,quote = FALSE)
+
+```
+
+```{bash SplitSignals}
+/root/PennCNV-1.0.3/kcolumn.pl batch1_lrr_baf.txt split 2 -tab -head 3  -name -out split
+
+ls -1 SplitSigs/*a550778* > gw6list
+```
+PFB (Population frequency of B allele) file
+
+This file supplies the PFB information for each marker, and gives the chromosome coordinates information to PennCNV. It is a tab-delimited text file with four columns, representing marker name, chromosome, position and PFB values. When PFB value is 2, it means that the marker is a CN marker without polymorphism. An example is given below:
+
+```{bash MakePFBfiles}
+
+/root/PennCNV-1.0.3/compile_pfb.pl --listfile gw6list  --output gw6list.pfb
+#--snpposfile mapfile.txt
+```
+
+```{r EditPFbChr}
+
+pfb<-read.table("gw6list.pfb",header=T,sep="\t",stringsAsFactors = F)
+write.table(pfb,file="gw6list.pfb.txt", sep="\t", row.names=F,quote = FALSE)
+
+
+```
+
+
+
+```{bash makeHMMfi}
+used the affy_6.0 hmm file
+```
+calculate GC content surrounding each marker within specified sliding
+     window, using the UCSC GC annotation file (for example,
+     http://hgdownload.cse.ucsc.edu/goldenPath/hg19/database/gc5Base.txt.gz for
+     human NCBI37 genome assembly) that is also sorted
+
+     Example: cal_gc_snp.pl gc5Base.txt.sorted signalfile -output file.gcmodel
+
+```{bash makeGCmodel files}
+
+#1 sort ucsc file
+sort -k 2,2 -k 3,3n Annotations/gc5Base.txt gc5Base.txt.sorted
+
+#gw6list.pfb.txt no chr
+cal_gc_snp.pl Annotations/gc5Base.txt.sorted gw6list.pfb.txt -output file_hg19.gcmodel
+
+```
+
+
+ It requires a signal intensity file, a HMM file, a PFB file, and optionally a GCModel file
+
+```{bash CallCNVs}
+#Error in argument: please do not specify the --listfile argument (gw6list) and provide signal file names (sex_batch1.txt) in command line simultaneously
+
+/root/PennCNV-1.0.3/detect_cnv.pl -test -hmm /root/PennCNV-1.0.3/gw6/lib/affygw6.hmm -pfb /home/lmotlhabi/bsub_scripts/DA0000085/Axiom_Arrays/gw6list.pfb.txt  --directory /home/lmotlhabi/bsub_scripts/DA0000085/Axiom_Arrays -list gw6list --gcmodelfile file_hg19.gcmodel  -log gw6.log -out gw6_GCmodel.rawcnv
+#chry not supported yet
+/root/PennCNV-1.0.3/detect_cnv.pl -test -hmm /root/PennCNV-1.0.3/gw6/lib/affygw6.hmm -pfb /home/lmotlhabi/bsub_scripts/DA0000085/Axiom_Arrays/gw6list.pfb.txt  --directory /home/lmotlhabi/bsub_scripts/DA0000085/Axiom_Arrays -list gw6list --chrx --sexfile sexfile.txt  --gcmodelfile file_hg19.gcmodel -log gw6_chrxGC.log  -out gw6_sexfileChrX.rawcnv
+
+```
+The CN refers to the actual integer copy number estimates, and the normal copy number is 2. So for autosome, CN=0 or 1 means there is a deletion and CN>=3 means there is a duplication. For chrX or chrY in males, CN=1 is the normal copy number and CN=0 means a deletion.
+```{r CNVanalysis}
+cnvs<-read.table("gw6.rawcnv")
+cnvs<-read.table("gw6_sexfile.rawcnv")
+```
+
+Finding overlapping/neighboring genes for CNV callsFinding overlapping/neighboring genes for CNV calls
+
+
+The output file contains two additional columns to each line of the sampleall.cnv file. The first column represents the gene symbols and the second column indicates the distance between CNV and gene. In our case, the distance is always zero since we will only find CNVs that overlap with a gene. If the CNV does not overlap with any gene, the “NOT_FOUND” notation will be shown for the corresponding CNVs.
+```{bash}
+scan_region.pl gw6_GCmodel.rawcnv Annotations/hg19_refGene.txt -refgene -reflink Annotations/hg19_refLink.txt >  Allcnv_GCmodel_Refgen.rg19
+
+#ChrX
+
+scan_region.pl gw6_sexfileChrX.rawcnv Annotations/hg19_refGene.txt -refgene -reflink Annotations/hg19_refLink.txt >  ChrXcnv_GCmodel_Refgen.rg19
+
+```
+
+
+
+It is usually more useful to find neighboring genes for an intergenic CNV, we can use the --expandmax argument:
+
+This will expand the CNV up to 5 megabases in both direction and then try to find neighboring genes. Only the closest gene to the CNV will be written to output, while this closest gene might be located to the left or right side of the CNV (note that we use “left” and “right” here since CNVs occur in both forward and reverse chains without a predefined direction). To find only left genes, we can use the  --expandleft 5m argument. To find both left and right genes, we have to run the program twice with  --expandleft and --expandright argument respectively. This can be done easily in one single step:
+http://hgdownload.cse.ucsc.edu/goldenPath/hgFixed/database/ #refLink
+http://hgdownload.cse.ucsc.edu/goldenpath/hg19/database/ #refGene
+```{bash}
+ scan_region.pl gw6_GCmodel.rawcnv Annotations/hg19_refGene.txt -refgene -reflink Annotations/hg19_refLink.txt -expandleft 5m | scan_region.pl gw6_GCmodel.rawcnv Annotations/hg19_refGene.txt -refgene -reflink Annotations/hg19_refLink.txt -expandright 5m > Allcnv_GCmodel_5mRefgen.rg19
+ 
+ #ChrX
+ scan_region.pl gw6_sexfileChrX.rawcnv Annotations/hg19_refGene.txt -refgene -reflink Annotations/hg19_refLink.txt -expandleft 5m | scan_region.pl gw6_sexfileChrX.rawcnv Annotations/hg19_refGene.txt -refgene -reflink Annotations/hg19_refLink.txt -expandright 5m > ChrXcnv_GCmodel_5mRefgen.rg19
+```
+
+## Get Axiom GRanges and do a hg19tohg38 liftover
+#get sanpleNames
+###Get regions corresponding to the wes bedfile
+
+```{r WrangleCopyNoTabs}
+tble<-read.csv("Axiom_PMRA.Markers.csv", header=T, stringsAsFactors = F)
+list.files("SplitSigs")
+
+
+axm<-read.table("Allcnv_GCmodel_Refgen.rg19",stringsAsFactors = F)
+chrx<-read.table("ChrXcnv_GCmodel_Refgen.rg19",stringsAsFactors = F)
+axm<-rbind(axm,chrx)
+
+Splitcolmn<-function(colm=1,by=":",colNams=c("Seqlevel","Coord")){
+  Split<-colsplit(axm[,colm],by,c(colNams))
+  #axm_new<-cbind(axim,Split)
+  return(Split)
+}
+
+#get seqlevel start, end
+
+
+Split<-Splitcolmn()
+Split2<-colsplit(Split$Coord,"-",c("start","end"))
+axm<-cbind(Split,Split2,axm)
+
+axm<-axm[,c(1,3:4,5:length(axm))]
+names(axm)[5]<-"numsnp"
+names(axm)[6]<-"Length"
+names(axm)[7]<-"CopyNumber"
+names(axm)[8]<-"SampleName"
+names(axm)[9]<-"Startsnp"
+names(axm)[10]<-"Endsnp"
+names(axm)[11]<-"Gene"
+names(axm)[12]<-"Distance"
+
+axm$numsnp<-gsub("numsnp=","",axm$numsnp)
+axm$CopyNumber<-gsub("state[0-9],","",axm$CopyNumber)
+axm$CopyNumber<-gsub("cn=","",axm$CopyNumber)
+axm$Length<-gsub("length=","",axm$Length)
+
+axm$Startsnp<-gsub("startsnp=","",axm$Startsnp)
+axm$Endsnp<-gsub("endsnp=","",axm$Endsnp)
+
+axm<-axm[,c(1:3,5:length(axm))]
+#Splifiles were created from baf
+baf<-read.table("batch1_lrr_baf.txt",stringsAsFactors = F,header=TRUE,sep="\t")
+#Get Sample Names
+samples<-read.csv("Sample_info_files.csv", stringsAsFactors=F)
+axm_test<-axm
+axm<-axm_test
+splitFiles<-as.data.frame(unique(axm$SampleName))
+names(splitFiles)[1]<-"splitName"
+splitFiles$splitName<-as.character(splitFiles$splitName)
+splitFiles$SamName<- "0"
+for(i in seq_along(splitFiles$splitName)){
+tab<-read.table(splitFiles$splitName[i],sep="\t",header=T,stringsAsFactors = F)
+sam<-grep(names(tab)[5],names(baf))
+samName<-names(baf)[sam]
+splitFiles$SamName[i]<-samName
+}
+
+#merge with samples table
+splitFiles$SamName<-sub("\\.B.Allele.Freq","",splitFiles$SamName)
+splitFiles$Best.Array<-gsub("\\.","-",splitFiles$SamName)
+splitFiles$Best.Array<-gsub("\\-CEL","",splitFiles$Best.Array)
+
+SamplesList<-merge(splitFiles,samples,by.x="Best.Array",by.y="Best.Array")
+#splitFiles$samName<-sub("\.B.Allele.Freq","",splitFiles$samName)
+tab<-SamplesList[,c(2,3,6:8,11)]
+axm<-merge(axm,tab,by.x="SampleName",by.y="splitName")
+axm<-axm[,c(2:16,1)]
+
+save(axm,file="Allsamples_copyNumber_Axiom.RData")
+save(SamplesList,file="SampleList.RData")
+
+```
+
+```{r GetGRanges}
+
+#LIFTOVER
+#LiftOver is a popular tool from the UCSC Genome Browser for converting between different genome versions.
+#The rtracklayer package also exposes this function through the liftOver. 
+#To use liftOver you need a so-called “chain” file describing how to convert from one genome to another. 
+#This can be obtained by hand from UCSC, or directly from AnnotationHub
+
+#setUp For Lift over
+
+#Start and annotation hub
+ahub <- AnnotationHub()
+ahub.gr <- subset(ahub, rdataclass == "GRanges" & species == "Homo sapiens")
+gr <- ahub.gr[[1]]
+ahub.chain <- subset(ahub, rdataclass == "ChainFile" & species == "Homo sapiens")
+
+query(ahub.chain, c("hg19", "hg38"))
+
+chain <- ahub.chain[ahub.chain$title == "hg19ToHg38.over.chain.gz"]
+chain <- chain[[1]]
+
+
+##nexteraRapidCapture-Bed "hg38
+
+
+bedfile<-"/home/lmotlhabi/bsub_scripts/DA0000085/CNV_callers/Codex/batch1/nexterarapidcapture_exome_targetedregions_v1.2.bed"
+genome = "hg38"
+bed<-import.bed( bedfile)
+summary(bed)
+sum(width(bed)) #44.981843MB
+seqlevels(bed) 
+seqlevelsStyle(bed) <- "UCSC"
+seqlevels(bed)
+##get Axiom array:segment CNV data-Ovelaps nexterarapidcapture_exome bed
+load("Allsamples_copyNumber_Axiom.RData")
+names(axm)[1]<-"seqnames"
+ axm_gr<-makeGRangesFromDataFrame(axm,keep.extra.columns = T)
+  summary(axm_gr)
+  seqlevels(axm_gr) 
+  seqlevelsStyle(axm_gr) <- "UCSC"
+  
+  
+  #Get GeneAnnotations axm
+  
+##liftOver hg19tohg38
+   axm_gr <-unlist(liftOver(axm_gr, chain))
+   
+#Get Bed overlaps
+   
+#segmnets
+  hits<-findOverlaps(bed,axm_gr)
+  ##To get meta inf of snp6_1 we use subjectHits
+  
+  int_r<-pintersect(axm_gr[subjectHits(hits)],bed[queryHits(hits)])
+  axm_bedOverlapsintr_hg38<-int_r
+ save(list=c("axm_gr","axm_bedOverlapsintr_hg38"),file="AxiomArray_Granges.RData")
+                  
+```
+
+```{r GetAllsegments}
+
+axm_Nams<-unique(axm_gr$Sample.Name)
+
+axm_gaps<-gaps(axm_gr)
+
+hits <- findOverlaps(gr2, gr1)
+axm_gaps$CopyNumber<-as.numeric(2)
+
+
+
+```
+
+
+
+
+
+#Get Gene Annotations : https://support.bioconductor.org/p/67118/
+ Get# Axiom with Gene annotations
+ 
+ 
+
+```{r GeneAnnotations, eval=F}
+
+biocLite("Homo.sapiens")
+library(Homo.sapiens)
+#biocLite("TxDb.Hsapiens.UCSC.hg38.knownGene")
+library(TxDb.Hsapiens.UCSC.hg38.knownGene)
+
+#biocLite("BSgenome.Hsapiens.UCSC.hg38")
+library(BSgenome.Hsapiens.UCSC.hg38)
+
+geneRanges <- 
+    function(db, column="ENTREZID")
+{
+    g <- genes(db, columns=column)
+    col <- mcols(g)[[column]]
+    genes <- granges(g)[rep(seq_along(g), elementLengths(col))]
+    mcols(genes)[[column]] <- as.character(unlist(col))
+    genes
+}
+
+splitColumnByOverlap <-
+    function(query, subject, column="ENTREZID", ...)
+{
+    olaps <- findOverlaps(query, subject, ...)
+    f1 <- factor(subjectHits(olaps),
+                 levels=seq_len(subjectLength(olaps)))
+    splitAsList(mcols(query)[[column]][queryHits(olaps)], f1)
+}
+
+
+axm_hg19_gr<-makeGRangesFromDataFrame(axm,keep.extra.columns = T)
+  summary(axm_gr)
+  seqlevels(axm_gr) 
+  seqlevelsStyle(axm_gr) <- "UCSC"
+
+
+
+
+```
+
+##Get  gene overlapping segments from "Annotation.RData " 
+```{r getGeneSegmnts}
+
+bedfile<-"/home/lmotlhabi/bsub_scripts/DA0000085/CNV_callers/Codex/batch1/nexterarapidcapture_exome_targetedregions_v1.2.bed"
+genome = "hg38"
+bed<-import.bed( bedfile)
+summary(bed)
+sum(width(bed)) #44.981843MB
+seqlevels(bed) 
+seqlevelsStyle(bed) <- "UCSC"
+seqlevels(bed)
+#load hg38 Annotations.RData
+load("/home/lmotlhabi/bsub_scripts/RDATA/Annotation.RData") #annotation.gff gRanges
+seqlevelsStyle(annotation.gff) <- "UCSC"
+#save(list=c("axm_gr","axm_bedOverlapsintr_hg38"),file="AxiomArray_Granges.RData")
+ #hg38
+load("/home/lmotlhabi/bsub_scripts/DA0000085/Axiom_Arrays/RDATA/AxiomArray_Granges.RData") #axm_bedOverlapsintr_hg38 , axm_gr
+#to make sure chrs are carried over
+axm_gr$Chrom<-as.character(seqnames(axm_gr))
+
+#hg38 overlapping annotations
+source("/home/lmotlhabi/bsub_scripts/DA0000085/CNV_callers/SCRIPTS/getOverlaps.R")
+source("/home/lmotlhabi/bsub_scripts/DA0000085/CNV_callers/SCRIPTS//getWeightedCN.R")
+
+axm_list<-getOverlaps(axm_gr,bed,annotation.gff)
+int_ord<-axm_list[[1]]
+int_rev_ord<-axm_list[[2]]
+
+axm_geneSgments<-cbind(int_ord,int_rev_ord)
+
+axm_unqGeneName_sgmnts<-axm_geneSgments[axm_geneSgments$type=="gene",]
+ 
+#get only unique gene_name table
+
+geneNams<-unique(axm_unqGeneName_sgmnts$start)
+  
+
+gens_list<-list() 
+
+for(i in seq_along(geneNams)){
+gen<-grep(geneNams[i],axm_unqGeneName_sgmnts$start)
+gens_list[[i]]<-axm_unqGeneName_sgmnts[gen[1],]
+rm(gen)
+}
+unqGeneName_sgmnts<-do.call("rbind",gens_list)
+geneSgments<-axm_geneSgments
+
+
+save(unqGeneName_sgmnts, file="Pergene_Segments_axiomArray.RData")
+
+save(axm_geneSgments, file="allAnnotations_Segments_axiomArray.RData")
+
+save(list=c("axm_unqGeneName_sgmnts","axm_geneSgments"),file="axm_GeneOverlaps_Segments.RData")
+
+
+###get full gRanges of all genes
+#load("/home/lmotlhabi/bsub_scripts/DA0000085/Axiom_Arrays/RDATA/axm_GeneOverlaps_Segments.RData")
+
+
+```
+

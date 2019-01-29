@@ -1,0 +1,166 @@
+---
+title: "Facets_ASCN_callers"
+author: "Lala M Motlhabi"
+date: "7/31/2017"
+output: 
+  html_document: 
+    fig_height: 10
+    fig_width: 10
+    toc: yes
+    toc_depth: 4
+    toc_float: true
+    keep_md: yes
+    self_contained: no
+    output:
+      pandoc_args: [
+      "+RTS", "-K64m",
+      "-RTS"
+    ]
+---
+
+```{r setup, include=FALSE,eval=F}
+#facets github
+setwd("/home/lmotlhabi/bsub_scripts/DA0000085/CNV_callers/Facets/batch3")
+library(devtools)
+#devtools::install_github("mskcc/pctGCdata")
+devtools::install_github("mskcc/facets", build_vignettes = TRUE)
+library(facets)
+library(parallel)
+```
+get the snpPileup file
+Human variations without clinical assertions in VCF format that have been mapped to both GRCh37 and GRCh38 and are located at dbSNP in ftp://ftp.ncbi.nih.gov/snp/organisms/human_9606/VCF/.
+
+```{bash, eval=F}
+#copied dbSNP_v149 to local worskpace
+
+aws s3 sync --exclude="*" --include="*common_all_20161122.vcf.gz" s3://celgene-rnd-riku-researchanalytics/data/Genomes/Homo_sapiens/GRCh38.p2/Variants_all/dbSNP.v149 .
+
+#samtools docker image : loaded snpileup inside a samtools docker image
+#compile snp_pileup c++ script
+ g++ -std=c++11 -I htslib-1.3.1/htslib snp-pileup.cpp -lhts -o snp-pileup
+   ldconfig --help
+   echo $LD_LIBRARY_PATH
+     export LD_LIBRARY_PATH=/usr/local/lib
+   
+     export LD_LIBRARY_PATH=/usr/local/lib
+    more ~/.bashrc
+    echo "export LD_LIBRARY_PATH=/usr/local/lib"  >> ~/.bashrc
+    more ~/.bashrc
+
+ 
+#Try snp_pileup with one PDX_model/Control pairs (text file of )
+#snp-pile-u -g -p  <common_snp_vcf> <output> <control_bam> <tumor_recalib_bam>
+ bash /home/lmotlhabi/bsub_scripts/DA0000085/CNV_callers/Facets/RunFacets.sh
+  
+
+```
+###Pre-processing steps to prepare the data for segmenation analysis
+
+Positions with total read count below a lower depth threshold (default 35, use ndepth to
+change the default value) or exceed an upper threshold (> 1000) (excessive coverage) in
+the matched normal sample were removed. 
+
+positions are scanned by 150-250 bp interval to space out SNP-dense regions to reduce local patterns of serial dependencies that can result in hyper-segmentation in the downstream steps. 
+
+Read depth ratio between tumor and normal gives information on total copy number. 
+
+The variant (non-reference) allele frequency at heterozygous loci (germline variant allele frequency greater than 0.25 or less than 0.75) contain information on allelic imbalance. This pre-processing procedure on average yields
+
+logR : log-ratio of total read depth in the tumor versus that in the normal 
+logOR : log-odds ratio of the variant allele count in the tumor versus in the normal. 
+A normalizing constant is calculated for each tumor/normal pair to corrected for total library size, and 
+GC-bias is corrected using a loess regression of logR over GC content along 1kb windows along the genome.
+```{r GetSnpPileup,eval=F}
+
+#datafile<-read.csv("1994060146_Capture_NA12878.csv.gz",stringsAsFactors = F) #huge file #order normal-tumor
+facetsFit_list<-list()
+datafiles<-list.files(full.names = T)
+facetsFit_list<-mclapply(datafiles,FUN=function(dat){
+datafile<-dat
+rcmat = readSnpMatrix(datafile)
+xx = preProcSample(rcmat,gbuild="hg38")
+
+
+#Processes the output from preProcSample for given cval and min.nhet
+#A bivariate genome segmentation is performed on logR and logOR by extending the CBS
+
+#algorithm to the bivariate scenario using a T2 statistic for identifying change points.
+
+#If the maximal statistic is greater than a pre-determined critical value (cval), we declare a change exists and the change points that maximize this statistic. Lower cval lead to higher sensitivity for small changes. 
+#After segmentation, a clustering process is applied to group the segments into clusters of the same underlying genotype.
+
+
+oo=procSample(xx,cval=150)
+#In order to obtain correct
+#genotype calls for copy number, we need to identify the location of the normal diploid state.
+#We use the logOR summary measure estimates to identify the segment clusters in allelic
+#balances, and use these segments to determine the 2-copy state.
+
+#In diploid genome, logR = 0 is the normal 2-copy state
+oo$dipLogR
+
+#Call allele-specific copy number and associated cellular fraction, estimate tumor purity and
+#ploidy.
+
+#EM estimate of copy number and cellular fraction of segment clusters
+fit=emcncf(oo)
+SamName<-sub("\\.csv.gz","",(basename(datafile)))
+save(fit,file=paste(SamName,"_batch3.rda",sep=""))
+
+###Plot Output :
+#TOP
+#The top panel of the figure displays logR with chromosomes alternating in blue and gray. 
+#The green line indicates the median logR in the sample. 
+#The purple line indicates the logR of the diploid state. 
+ #MIDDLE
+#The second panel displays logOR. 
+#Segment means are ploted in red lines. The third panel plots the total (black) and minor (red) copy number for each segment. 
+ #BOTTOM
+
+#The bottom bar shows the associated cellular fraction (cf). 
+#Dark blue indicates high cf. Light blue indicates low cf. Beige indicates a normal segment (total=2,minor=1).
+
+
+pdf(paste(SamName,"_batch3.pdf",sep=""))
+plotSample(x=oo,emfit=fit,sname=paste(SamName,": Purity: ",round(fit$purity,2),"Ploidy: ",round(fit$ploidy,2),sep=""))
+dev.off()
+})
+names(facetsFit_list) #it's empty why??
+
+```
+
+
+```{r GetallSamples}
+allSamples_cncf_list<-list()
+allSamples_purPloidy_list<-list()
+fitfiles<-list.files(pattern=".rda")
+#fitfiles<-fitfiles[1:28]
+for(i in seq_along(fitfiles)){
+load(fitfiles[i])
+SamName<-SamName<-sub("\\.rda","",(basename(fitfiles[i])))
+cncf<-fit$cncf
+cncf$SampleName<-SamName
+cncf$CNV_caller<-"Facets"
+Controls<-sub(".*_NA","NA",SamName)
+Controls<-sub("_batch3","",Controls)
+cncf$Control<-Controls
+cncf<-cncf[,c(1,10,11,2,13,15:17,12,14,3:9)]
+
+
+allSamples_cncf_list[[i]]<-cncf
+names(allSamples_cncf_list)[i]<-SamName
+
+
+pp<-data.frame(purity=round(fit$purity,2),ploidy=round(fit$ploidy,2),CNV_CALLER="Facets", Control=Controls,SampleName=SamName)
+#flag<-as.data.frame(SampleName=SamName,flags=fit$emflags)
+
+allSamples_purPloidy_list[[i]]<-pp
+names(allSamples_purPloidy_list)[i]<-SamName
+
+rm(pp);rm(cncf);rm(fit);rm(SamName)
+}
+allSamples_purPloidy<-do.call("rbind",allSamples_purPloidy_list)
+allSamples_facets_cn<-do.call("rbind",allSamples_cncf_list)
+save(list=c("allSamples_cncf_list","allSamples_purPloidy","allSamples_facets_cn"),file="/home/lmotlhabi/bsub_scripts/DA0000085/CNV_callers/Facets/batch3/RDATA/FACETSallSamples_batch3.rda")
+```
+
