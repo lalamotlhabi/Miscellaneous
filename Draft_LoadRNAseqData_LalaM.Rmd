@@ -1,0 +1,371 @@
+---
+title: "RNA-Seq QC"
+author: "Lala M Motlhabi"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    fig_height: 8
+    fig_width: 8
+    toc: yes
+    toc_depth: 4
+    toc_float: true
+    keep_md: no
+    self_contained: no
+    code_folding: hide
+    output:
+      pandoc_args: [
+      "+RTS", "-K64m",
+      "-RTS"
+    ]
+
+
+---
+
+
+# Disclaimer
+
+This is a DRAFT document.
+Please do not use any of its content without contacting the author first.
+
+
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set( cache=TRUE )
+knitr::opts_chunk$set( echo=TRUE )
+knitr::opts_chunk$set( message=FALSE )
+knitr::opts_chunk$set(warning=FALSE )
+knitr::opts_chunk$set(autodep=TRUE)
+options(figcap.prefix = "Figure", figcap.sep = ":", figcap.prefix.highlight = "**")
+options(tabcap.prefix = "Table", tabcap.sep = ":", tabcap.prefix.highlight = "**")
+```
+
+
+```{r config, echo=FALSE,message=FALSE,warning=FALSE,cache=FALSE}
+# this is the configuration part of the report
+library("knitr")
+library("XMLRPC")
+library("tools")
+library("edgeR")
+suppressMessages(library(ChIPpeakAnno))
+suppressMessages(library(rtracklayer))
+library(Vennerable)
+library(FactoMineR)
+library(reshape2)
+library(ggplot2)
+library(plotly)
+library(dplyr)
+source("Utils/R_lib/CommonFunc.R")
+source("Utils/R_lib/loadData.R")
+source("Utils/R_lib/database.R")
+source("Utils/R_lib/StandardQCplots.R")
+source("Utils/R_lib/StandardDGEplots.R")
+source("Utils/R_lib/VennLists.R")
+## We don't want this big dataset to be included in the docker image.
+#source("https://bioconductor.org/biocLite.R")
+#if(require("BSgenome.Hsapiens.UCSC.hg38")==FALSE){biocLite("BSgenome.Hsapiens.UCSC.hg38",suppressUpdates = TRUE,ask=FALSE)}
+#if(require("TxDb.Hsapiens.UCSC.hg38.knownGene")==FALSE){biocLite("TxDb.Hsapiens.UCSC.hg38.knownGene",suppressUpdates = TRUE,ask=FALSE)}
+#if(require("org.Hs.eg.db")==FALSE){biocLite("org.Hs.eg.db",suppressUpdates = TRUE,ask=FALSE)}
+#library("BSgenome.Hsapiens.UCSC.hg38")
+#library("TxDb.Hsapiens.UCSC.hg38.knownGene")
+#library("org.Hs.eg.db")
+
+dd=getwd()
+```
+
+
+```{r sampleSetup}
+# The project is used in various locations in the report, for titles, text etc.
+source(file.path(dd,"RNA-Seq-xeno.R"))
+cache.dir=file.path(dd,"..","derived")
+dir.create(cache.dir,recursive = FALSE, showWarnings = FALSE)
+```
+
+
+
+Read counts are loaded from STAR (using the defined strandness for each sample), and Salmon. RPKMs are produced using the rpkm function.
+In the case of Salmon first the transcript TPMs are loaded from the fiels and subsequenctly summarized using the `tximport` package from Bioconductor. The generated pseudocounts have been scaled for the length of transcripts using the 'lengthScaleTPM' so the gene length need _not_ be provided as an offsed during analysis with tools such as edgeR or DESeq2.
+
+
+
+
+
+```{r dataLoadrnaseq, warning=TRUE, cache=FALSE,message=FALSE }
+if(!is.null(htseq.dir) ){ 
+  htseqCachefile=file.path(cache.dir,paste0("CountsHTseq.",min(sampleidsList),"-",max(sampleidsList),".RData"))
+  htseqCachefileXL=file.path(cache.dir,paste0("CountsHTseq.",min(sampleidsList),"-",max(sampleidsList),".xls") )
+  if( !is.null(xenoflag)){
+    flag=xenoflag
+    htseqCachefileXL=file.path(cache.dir,paste0("CountsHTseq.",min(sampleidsList),"-",max(sampleidsList),"-",flag,".xls") )
+    htseqCachefile=file.path(cache.dir,paste0("CountsHTseq.",min(sampleidsList),"-",max(sampleidsList),"-",flag,".RData") )
+  }
+if( !file.exists( htseqCachefile )) {
+  
+  htseq.files=list.files(path=cf(htseq.dir),pattern="htseq-count$" ,full.names = TRUE,recursive = FALSE)
+  htseq.sampleids=sapply( cf(htseq.files,direction = 'toaws'), function(X){getSampleID(filename=X)})
+  if( length(htseq.sampleids) != nrow(df.sampleData)){
+    warning("NOTE: The total number of HTseq files is not the same as the number of samples in the metadata matrix")
+  }
+  if( setdiff( df.sampleData$sample_id , htseq.sampleids) %>% length()  > 0){
+    warning( "There are more sample ids in the list than files in the HTSeq directories ")
+    knitr::knit_exit()
+  }
+  sid=intersect( df.sampleData$sample_id, htseq.sampleids)
+  sid.index=which(htseq.sampleids %in% sid)
+  htseq.sampleids=htseq.sampleids[ sid.index ] %>% as.character()
+  htseq.files=htseq.files[ sid.index ]
+  countData.htseq=MatrixFromHTSeqCount(files=htseq.files ,names = htseq.sampleids,verbose = TRUE)
+  dge=DGEList(countData.htseq)
+  dge=calcNormFactors(dge)
+  v=voom( dge )
+  countData.htseq.norm=v$E
+  v=voom( dge, normalize.method='quantile')
+  countData.htseq.quant=v$E
+  #colnames(countData.star)=rownames(df.sampleData)[match(colnames(countData.star), df.sampleData$sample_id) ]
+  save( list=c("countData.htseq","htseq.sampleids", "id2name", "countData.htseq.norm","countData.htseq.quant"),
+        file=htseqCachefile )
+  cat("\t",paste(df.sampleData[match(colnames( countData.htseq), df.sampleData$sample_id),'display_name'],"\t"),"\n",
+        file=htseqCachefileXL )
+   write.table( countData.htseq,  htseqCachefileXL ,quote=FALSE, sep="\t",col.names=NA, append=TRUE )
+   
+}else{
+  load(htseqCachefile)
+}
+}
+
+if(!is.null(STARcounts.dir)){
+  starCachefile=file.path(cache.dir,paste0("CountsStar.",min(sampleidsList),"-",max(sampleidsList),".RData") )
+  starCachefileXL=file.path(cache.dir,paste0("CountsStar.",min(sampleidsList),"-",max(sampleidsList),".xls") )
+  starCachefilerpkmXL=file.path(cache.dir,paste0("CountsRPKMStar.",min(sampleidsList),"-",max(sampleidsList),".xls") )
+  if( !is.null(xenoflag)){
+    flag=xenoflag
+    starCachefile=file.path(cache.dir,paste0("CountsStar.",min(sampleidsList),"-",max(sampleidsList),"-",flag,".RData") )
+    starCachefileXL=file.path(cache.dir,paste0("CountsStar.",min(sampleidsList),"-",max(sampleidsList),"-",flag,".xls") )
+    starCachefilerpkmXL=file.path(cache.dir,paste0("CountsRPKMStar.",min(sampleidsList),"-",max(sampleidsList),"-",flag,".xls") )
+  }
+if(!file.exists( starCachefile) ){
+
+  star.files=list.files(path=cf(STARcounts.dir), pattern="ReadsPerGene.out.tab$" ,full.names = TRUE,recursive = FALSE)
+ 
+  star.sampleids=sapply( cf(star.files,direction = 'toaws'), function(X){getSampleID(filename=X)})
+  if( length(star.sampleids) != nrow(df.sampleData)){
+    warning("The total number of STAR files is not the same as the number of samples in the metadata matrix\n")
+    warning("There are ", length(star.files) ," STAR files and ", nrow(df.sampleData)," samples in the list of samples\n")
+    warning("If this is expected ignore this message")
+    #stop()
+  }
+  if( setdiff( df.sampleData$sample_id , star.sampleids) %>% length()  > 0){
+    warning( "There are more sample ids in the list than files in the STAR directories ")
+    knitr::knit_exit()
+  }
+  # make sure that we use files from sample_ids that we want to process
+  sid=intersect( df.sampleData$sample_id, star.sampleids)
+  sid.index=which(star.sampleids %in% sid)
+  star.sampleids=star.sampleids[ sid.index ]
+  star.files=star.files[ sid.index ]
+  type=df.sampleData[ match( star.sampleids, df.sampleData$sample_id), 'stranded']
+  countData.star=MatrixFromSTARCount(files=star.files , type=type, names = star.sampleids,verbose = TRUE)
+  countData.star=countData.star[5:nrow(countData.star),] # remove the first 4 lines which contain the summaries
+  dge=DGEList(countData.star)
+  dge=calcNormFactors(dge)
+  v=voom( dge )
+  countData.star.norm=v$E
+  v=voom( dge, normalize.method='quantile')
+  countData.star.quant=v$E
+
+  
+  
+ 
+
+  #Load the annotation and reduce it
+  exons=annotation.gff[ which(annotation.gff$type=="exon") ]
+  grl <- reduce(split(exons, elementMetadata(exons)$gene_id))
+  reducedGTF <- unlist(grl, use.names=T)
+  elementMetadata(reducedGTF)$widths <- width(reducedGTF)
+  elementMetadata(reducedGTF)$gene_id=names(reducedGTF)
+  calc_length <- function(x) {
+      width = sum(elementMetadata(x)$widths)
+      width
+  }
+  gene.lengths = sapply(split(reducedGTF, elementMetadata(reducedGTF)$gene_id), calc_length)
+  countData.star.rpkm=rpkm( dge, gene.length=gene.lengths)
+
+
+  #colnames(countData.star)=rownames(df.sampleData)[match(colnames(countData.star), df.sampleData$sample_id) ]
+  save( list=c("countData.star","star.sampleids", "id2name", "countData.star.norm","countData.star.quant","countData.star.rpkm"),
+        file=starCachefile)
+  cat("\t",paste(df.sampleData[match(colnames( countData.star), df.sampleData$sample_id),'display_name'],"\t"),"\n",
+        file=starCachefileXL )
+   write.table( countData.star,  starCachefileXL ,quote=FALSE, sep="\t",col.names=NA, append=TRUE )
+   
+   cat("\t",paste(df.sampleData[match(colnames( countData.star.rpkm), df.sampleData$sample_id),'display_name'],"\t"),"\n",
+        file=starCachefilerpkmXL )
+   write.table( countData.star.rpkm,  starCachefilerpkmXL ,quote=FALSE, sep="\t",col.names=NA, append=TRUE )
+}else{
+  load(starCachefile)
+}
+}
+
+if(!is.null(Salmoncounts.dir) ){ 
+salmonCachefile=file.path(cache.dir,paste0("CountsSalmon.",min(sampleidsList),"-",max(sampleidsList),".RData"))
+  salmonCachefilegenesXL=file.path(cache.dir,paste0("CountsSalmon.genes.",min(sampleidsList),"-",max(sampleidsList),".xls"))
+  salmonCachefileisoTPMXL=file.path(cache.dir,paste0("CountsSalmon.isoforms.TPM.",min(sampleidsList),"-",max(sampleidsList),".xls"))
+  salmonCachefilegeneTPMXL=file.path(cache.dir,paste0("CountsSalmon.genes.TPM.",min(sampleidsList),"-",max(sampleidsList),".xls"))
+  salmonCachefileisoXL=file.path(cache.dir,paste0("CountsSalmon.isoforms.",min(sampleidsList),"-",max(sampleidsList),".xls"))
+  if( !is.null(xenoflag)){
+    flag=xenoflag
+    salmonCachefile=file.path(cache.dir,paste0("CountsSalmon.",min(sampleidsList),"-",max(sampleidsList),"-",flag,".RData"))
+    salmonCachefilegenesXL=file.path(cache.dir,paste0("CountsSalmon.genes.",min(sampleidsList),"-",max(sampleidsList),"-",flag,".xls"))
+    salmonCachefileisoTPMXL=file.path(cache.dir,paste0("CountsSalmon.isoforms.TPM.",min(sampleidsList),"-",max(sampleidsList),"-",flag,".xls"))
+    salmonCachefilegenesTPMXL=file.path(cache.dir,paste0("CountsSalmon.genes.TPM.",min(sampleidsList),"-",max(sampleidsList),"-",flag,".xls"))
+    salmonCachefileisoXL=file.path(cache.dir,paste0("CountsSalmon.isoforms.",min(sampleidsList),"-",max(sampleidsList),"-",flag,".xls"))
+  }
+  }
+if(!file.exists( salmonCachefile) ){
+  #salmon.files=read.table( file.path(project.dir,"RNASeq","data","Salmon.files") )
+  salmon.files=list.files(path=cf(Salmoncounts.dir), pattern="quant.sf$" ,full.names = TRUE,recursive = TRUE)
+  salmon.sampleids=sapply(cf(salmon.files, direction = 'toaws'), function(X){ getSampleID(filename=X)  } )
+  # make sure that we use files from sample_ids that we want to process
+  sid=intersect( df.sampleData$sample_id, salmon.sampleids)
+  sid.index=which(salmon.sampleids %in% sid)
+  
+  
+  salmon.sampleids=salmon.sampleids[ sid.index ]
+  salmon.files=salmon.files[ sid.index ]
+  
+  if( length(salmon.sampleids) != nrow(df.sampleData)){
+    cat("NOTE: The total number of Salmon files is not the same as the number of samples in the metadata matrix")
+    stop()
+  }
+  
+  library(tximport)
+  library(readr)
+  countData.genes.salmon=data.frame()
+  countData.transcripts.salmon=data.frame()
+  countData.isoform.tpm.salmon=data.frame()
+  countData.genes.tpm.salmon=data.frame()
+  for(fn in salmon.files ){
+    # use tximport. The dropInfReps=TRUE allows the function to get the data without complaining about the Salmon version
+    txi=tximport( c(fn), type="salmon", tx2gene=tx2gene, txOut=TRUE,dropInfReps=TRUE)  # load the transcripts the way they are (no summarization)
+    txcounts=as.data.frame(cbind(rownames(  txi$counts),txi$counts))
+    
+    colnames(txcounts)=c("transcript_id",fn)
+    if(nrow(countData.transcripts.salmon)==0){
+            countData.transcripts.salmon=txcounts
+    }else{
+      countData.transcripts.salmon=dplyr::full_join( countData.transcripts.salmon, txcounts, by="transcript_id" )
+    }
+    tpmcounts=as.data.frame(cbind(rownames(  txi$abundance),txi$abundance))
+    colnames(tpmcounts)=c("transcript_id",fn)
+    if(nrow(countData.isoform.tpm.salmon)==0){
+            countData.isoform.tpm.salmon=tpmcounts
+    }else{
+      countData.isoform.tpm.salmon=dplyr::full_join( countData.isoform.tpm.salmon, tpmcounts, by="transcript_id" )
+    }
+    
+    
+    
+    gxi=summarizeToGene(  txi, tx2gene=tx2gene, countsFromAbundance="lengthScaledTPM")
+    counts=as.data.frame(cbind(rownames(gxi$counts), gxi$counts))
+    colnames(counts)=c("gene_id",fn)
+    if(nrow(countData.genes.salmon)==0){
+            countData.genes.salmon=counts
+    }else{
+      countData.genes.salmon=dplyr::full_join( countData.genes.salmon, counts, by="gene_id" )
+    }
+    
+    gcounts=as.data.frame(cbind(rownames(  gxi$abundance),gxi$abundance))
+    colnames(gcounts)=c("gene_id",fn)
+    if(nrow(countData.genes.tpm.salmon)==0){
+            countData.genes.tpm.salmon=gcounts
+    }else{
+      countData.genes.tpm.salmon=dplyr::full_join( countData.genes.tpm.salmon, gcounts, by="gene_id" )
+    }
+  }
+  rn=countData.genes.salmon[,'gene_id']
+  countData.genes.salmon=countData.genes.salmon[,-1]
+  countData.genes.salmon=as.data.frame(apply( countData.genes.salmon, 2, function(X){ as.numeric(as.character(X))}))
+  rownames(countData.genes.salmon)=rn
+  colnames(countData.genes.salmon)=salmon.sampleids
+  
+  rn=countData.transcripts.salmon[,'transcript_id']
+  countData.transcripts.salmon=countData.transcripts.salmon[,-1]
+  countData.transcripts.salmon=as.data.frame(apply( countData.transcripts.salmon, 2, function(X){ as.numeric(as.character(X))}))
+  rownames(countData.transcripts.salmon)=rn
+  colnames(countData.transcripts.salmon)=salmon.sampleids
+  #colnames(countData.salmon)=rownames(df.sampleData)[match(colnames(countData.salmon), df.sampleData$sample_id) ]
+  #colnames(countData.salmon)=c('gene_name',salmon.sampleids)
+  #rownames(df.sampleData)=df.sampleData$sample_id
+  #colnames(countData.salmon)[2:ncol(countData.salmon)]=df.sampleData[ colnames(countData.salmon)[2:ncol(countData.salmon)], 'display_name' ]
+  
+  
+  save( list=c("countData.genes.salmon","countData.transcripts.salmon", "salmon.files", "df.sampleData","id2name"),file=salmonCachefile )
+  cat("\t",paste(df.sampleData[match(colnames( countData.genes.salmon), df.sampleData$sample_id),'display_name'],"\t"),"\n",
+        file=salmonCachefilegenesXL )
+  write.table( countData.genes.salmon, salmonCachefilegenesXL ,quote=FALSE, sep="\t",col.names=NA , append=TRUE)
+  
+  cat("\t",paste(df.sampleData[match(colnames( countData.transcripts.salmon), df.sampleData$sample_id),'display_name'],"\t"),"\n",
+        file=salmonCachefileisoXL)
+  write.table( countData.transcripts.salmon, salmonCachefileisoXL ,quote=FALSE, sep="\t",col.names=NA, append = TRUE )
+  
+  colnames(countData.isoform.tpm.salmon)=c("transcript_id",salmon.sampleids)
+  cat("\t",paste(df.sampleData[match(colnames( countData.isoform.tpm.salmon), df.sampleData$sample_id),'display_name'],"\t"),"\n",
+        file=salmonCachefileisoTPMXL )
+  write.table( countData.isoform.tpm.salmon, salmonCachefileisoTPMXL ,quote=FALSE, sep="\t",col.names=NA , append=TRUE)
+  
+
+  colnames(countData.genes.tpm.salmon)=c("gene_id",salmon.sampleids)
+  cat("\t",paste(df.sampleData[match(colnames( countData.genes.tpm.salmon), df.sampleData$sample_id),'display_name'],"\t"),"\n",
+        file=salmonCachefilegeneTPMXL )
+  write.table( countData.genes.tpm.salmon, salmonCachefilegeneTPMXL ,quote=FALSE, sep="\t",col.names=NA , append=TRUE)
+
+}else{
+  load(salmonCachefile )
+}
+
+# the bamQQc module is working with STAR and Salmon counts. 
+# if we don't have star data (but have htseq) we will rename the htseq data to 'star' 
+if( !is.null(htseq.dir) & is.null( STARcounts.dir) ){
+  countData.htseq->countData
+  countData.htseq.norm->countData.norm
+  countData.htseq.quant->countData.quant
+  countingMethod="HTseq"
+  rm(list=c("countData.htseq","countData.htseq.norm","countData.htseq.quant"))
+}
+  
+if( !is.null( STARcounts.dir)){
+  countData.star->countData
+  countData.star.norm->countData.norm
+  countData.star.quant->countData.quant
+  countingMethod="STAR"
+  rm(list=c("countData.star","countData.star.norm","countData.star.quant"))
+}
+  
+  
+  
+
+```
+
+
+In the derived directory the following files have the counts
+
+Information about the samples `r paste0("Data-",min(sampleidsList),"-",max(sampleidsList))`.Rdata
+
+R object with the annotation used in this set (gencode v24) Annotation.Rdata
+
+Gene counts from STAR (equivalent to HTSeq) `r paste0("CountsStar.",min(sampleidsList),"-",max(sampleidsList),".xls")`
+
+Gene RPKM values from STAR `r paste0("CountsRPKMStar.",min(sampleidsList),"-",max(sampleidsList),".xls")`
+
+Pseudocounts at gene level from Salmon + tximport `r paste0("CountsSalmon.",min(sampleidsList),"-",max(sampleidsList),".xls")`  
+
+Pseudocounts at transcript level from Salmon (NumReads column)  `r paste0("CountsSalmon.isoforms.",min(sampleidsList),"-",max(sampleidsList),".xls")`
+
+TPM (at transcript level) from Salmon (TPM column)  `r paste0("CountsSalmon.TPM.",min(sampleidsList),"-",max(sampleidsList),".xls")`
+
+
+
+
+
+
+
