@@ -48,18 +48,26 @@ library(caret)
 
 
 ```
+
+#Response Documentation to Interview Screen Questions  
+
+
 Carefully read this instructions and "Example for a mock study"
 Visit http://www.ncbi.nlm.nih.gov/ and search for GSE24742 and GSE 10024
 Read descriptions for each study and download TEXT files at the bottom of each page
 Open text files and, using information in those files and on NIH website, fill out excel spreadsheets "GSE24742" and "GSE10024" in this document
-First, fill in column names. If the treatment was described, write in the name of that treatment.  In the mock study, there were two treatments - montelukast and placebo. 
+
+##First, 
+fill in column names. If the treatment was described, write in the name of that treatment.  In the mock study, there were two treatments - montelukast and placebo. 
 Second, for each column in GSE24742 and GSE10024 tabs, insert NUMBER OF PATIENTS you found in the downloaded text files. For example, in the mock study, researchers had 60 patients on montelukast. Therefore, you will write "60" under Montelukast treatment column.
 Use terminology you find on NIH website and in the text files; for tissue, use MeSH terminology; for disease, use either MeSH or MedDRA terms.
 
+Used  R- bioconductor GEOquery to assess the  two GSE# data sets cross referencing with the GEO web_portal 
 ```{r getGSE}
 BiocManager::install("GEOquery", version = "3.8")
 #install.packages('bit64')
 library(GEOquery)
+
 gse <- getGEO("GSE24742", GSEMatrix = TRUE)
 gse_noMtrx <- getGEO("GSE24742", GSEMatrix = F)
 show(gse)
@@ -93,18 +101,22 @@ gds<-getGEO("GDS4903")
 Columns(gds)[4]
 ```
 
-Second part of the test is this: you need to find on ClinVar (http://www.ncbi.nlm.nih.gov/clinvar) all variants that are related to Multiple Sclerosis. Once found, select only ones that have germline allele origin and that are related to “risk factors”. Download (small button in the lower right corner of the webpage) the results of the search and open them in excel.
+##Second part of the test is this:   
+you need to find on ClinVar (http://www.ncbi.nlm.nih.gov/clinvar) all variants that are related to Multiple Sclerosis. Once found, select only ones that have germline allele origin and that are related to “risk factors”. Download (small button in the lower right corner of the webpage) the results of the search and open them in excel.
 Once that is done, please add and populate 3 new columns:
  
 -One column for Gene Entrez ID
 -One column for mRNA differential expression tissue (preferably as reported by GTex). This column should have a list of 1 – 3 tissues where the mRNA for respective gene is found to be overabundant
 -Last column is to capture the URL where you found the tissue expression information.
-```{r}
+
+Utilized R-package "VarFromPDB" to extract all Variants from CLinVar related to MS, and crossreferencing with  NCBI- ClinVar web_portal queries
+```{r getClinvarMS}
 devtools::install_github("jamesdiao/clinvaR")
 require(clinvaR)
 install.packages("VarfromPDB")
 library(VarfromPDB)
-  clinvar.phenotype = extract_clinvar(keyword="retinoblastoma")
+clinvar.phenotype = extract_clinvar(keyword="Multiple Sclerosis")
+
 genes.clinvar = clinvar.phenotype[[1]]
  print(dim(genes.clinvar))
 variants.clinvar = clinvar.phenotype[[2]]
@@ -126,6 +138,8 @@ One column for mRNA differential expression tissue (preferably as reported by GT
 This column should have a list of 1 – 3 tissues where the mRNA for respective gene is found to be overabundant  
 -Last column is to capture the URL where you found the tissue expression information.  
 https://storage.googleapis.com/gtex_analysis_v7/multi_tissue_eqtl_data/GTEx_Analysis_v7.metasoft.txt.gz
+
+Attempted to  dowmload , and read in the "GTEx_Analysis_v7.metasoft.txt.gz" (too large), and manually annotate GTex  per tissue DGE adata
 ```{r getGenediff, eval =FALSE}
 install.packages("BiocManager")
 BiocManager::install("recount")
@@ -144,7 +158,10 @@ tail(df)
 dat_tis<-data.table::fread("/Users/la/Desktop/eqtl_tissue_set.metasoft.txt", stringsAsFactors = F)
 ```
 
-#Curation task
+#Technical_Skills_Test
+
+##Curation task:  
+
 This is a curation task. You should make a standalone python or R script file (.py or .R, .ipynb, .Rmd file types all accepted) for this task.
 Again, use Python or R, only commonly accepted packages allowed. 
 Please tell us how to run your programs, it's your responsibility to provide sufficient instructions so that we can run your scripts.
@@ -165,6 +182,7 @@ Carefully read the instructions below:
 - There are some well known typos in the data files. Hint: "aspErin" is actually "aspirin", you need to use the correct name in the curated output table
 - Complete this curation task programatically, we'll grade your script
 - Output curated table in a csv file, named "output_table.csv"
+
 ```{r curationTask}
 #get list of all the file names in the data folder
 filenames<-basename(list.files("/Users/la/Desktop/technical_test/data", full.names = T))
@@ -205,7 +223,7 @@ write.csv(dat_file,"./output_table.csv",row.names = F,quote = F)
 ```
 
 
-#2. Write a function named perfect_squares(int a, int b) that takes a minimum and maximum and returns the number of perfect squares that exist in that range (inclusive). The max and min will always be integers and always given in the correct order
+##2. Write a function named perfect_squares(int a, int b) that takes a minimum and maximum and returns the number of perfect squares that exist in that range (inclusive). The max and min will always be integers and always given in the correct order
 
 Q2 test cases:
 should return 2, perfect_sqaures(4, 9)
@@ -258,7 +276,8 @@ ifelse(length(sqrt_list[sqrt_list > 0]) > 0, print(length(sqrt_list[sqrt_list > 
 
 ```
 
-#Answer the questions on Git commands, assuming you are working in a Linux environment.
+##Answer the questions on Git commands, assuming you are working in a Linux environment.
+
 1. Write the command to clone a directory called "git@github.com:user/foo" (test purposes only, not a real repository)
 2. Change into that directory
 3. Create a branch called "test"
@@ -297,7 +316,7 @@ git push origin master
 ```
 
  
- ##Linux_Command_line_Questions
+##Linux_Command_line_Questions
  Write the commands necessary to:
 1. Create a directory in home named "test"
 2. Create an empty file name in home named "foo.txt"
@@ -345,7 +364,7 @@ cd
 
 
 ```
-#10. Explain the difference between a relative and absolute path
+##10. Explain the difference between a relative and absolute path
 e.g. given the same path to the same file location;
  relative path  starts from the working directory, without providing the full absolute path which includes the root directory
  absolute path  points to the same path by including the complete path with the root directory
