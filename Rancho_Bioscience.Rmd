@@ -1,0 +1,357 @@
+---
+title: "RanchoBioscience_Interview_Test
+author: "Lala M Motlhabi"
+date: "9/24/2018"
+output:
+    html_document:
+    code_folding: hide
+    fig_height: 28
+    fig_width: 24
+    keep_md: no
+    output:
+      pandoc_args:
+      - +RTS
+      - -K64m
+      - -RTS
+    self_contained: no
+    toc: yes
+    toc_depth: 4
+    toc_float: yes
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set( cache=TRUE )
+knitr::opts_chunk$set( echo=TRUE )
+knitr::opts_chunk$set( message=FALSE )
+knitr::opts_chunk$set(warning=FALSE )
+knitr::opts_chunk$set(autodep=TRUE)
+knitr::opts_chunk$set(tidy=TRUE )
+knitr::include_graphics("UpsetR.plot.pdf")
+options(figcap.prefix = "Figure", figcap.sep = ":", figcap.prefix.highlight = "**")
+options(tabcap.prefix = "Table", tabcap.sep = ":", tabcap.prefix.highlight = "**")
+```
+```{r config,include=FALSE}
+#install.packages("ssh.utils")
+library(dplyr)
+library(DT)
+library(reshape2)
+#library(mongolite)
+library(stringr)
+library(data.table)
+library(doParallel)
+library(pheatmap)
+library(biomaRt)
+library(caret)
+
+
+
+
+```
+Carefully read this instructions and "Example for a mock study"
+Visit http://www.ncbi.nlm.nih.gov/ and search for GSE24742 and GSE 10024
+Read descriptions for each study and download TEXT files at the bottom of each page
+Open text files and, using information in those files and on NIH website, fill out excel spreadsheets "GSE24742" and "GSE10024" in this document
+First, fill in column names. If the treatment was described, write in the name of that treatment.  In the mock study, there were two treatments - montelukast and placebo. 
+Second, for each column in GSE24742 and GSE10024 tabs, insert NUMBER OF PATIENTS you found in the downloaded text files. For example, in the mock study, researchers had 60 patients on montelukast. Therefore, you will write "60" under Montelukast treatment column.
+Use terminology you find on NIH website and in the text files; for tissue, use MeSH terminology; for disease, use either MeSH or MedDRA terms.
+
+```{r getGSE}
+BiocManager::install("GEOquery", version = "3.8")
+#install.packages('bit64')
+library(GEOquery)
+gse <- getGEO("GSE24742", GSEMatrix = TRUE)
+gse_noMtrx <- getGEO("GSE24742", GSEMatrix = F)
+show(gse)
+ show(pData(phenoData(gse[[1]])))
+eset <- GDS2eSet(gds,do.log2=TRUE)
+gsmplatforms <- lapply(GSMList(gse_noMtrx),function(x) {Meta(x)$platform_id})
+
+gsmlist = GSMList(gse_noMtrx)
+tab<-data.frame(pData(phenoData(gse[[1]])))
+gds<-getGEO("GDS4903")
+Columns(gds)[4]
+
+
+
+##GSE10024
+gse_1024 <- getGEO("GSE10024", GSEMatrix = TRUE)
+tab_1024<-data.frame(pData(phenoData(gse_1024[[1]])))
+gse1024_noMtrx <- getGEO("GSE10024", GSEMatrix = F)
+gset <- getGEO("GSE10024", GSEMatrix =TRUE, getGPL=FALSE)
+if (length(gset) > 1) idx <- grep("GPL96", attr(gset, "names")) else idx <- 1
+gset <- gset[[idx]]
+
+show(gse)
+ show(pData(phenoData(gse[[1]])))
+eset <- GDS2eSet(gds,do.log2=TRUE)
+gsmplatforms <- lapply(GSMList(gse_noMtrx),function(x) {Meta(x)$platform_id})
+
+gsmlist = GSMList(gse_noMtrx)
+tab<-data.frame(pData(phenoData(gse[[1]])))
+gds<-getGEO("GDS4903")
+Columns(gds)[4]
+```
+
+Second part of the test is this: you need to find on ClinVar (http://www.ncbi.nlm.nih.gov/clinvar) all variants that are related to Multiple Sclerosis. Once found, select only ones that have germline allele origin and that are related to “risk factors”. Download (small button in the lower right corner of the webpage) the results of the search and open them in excel.
+Once that is done, please add and populate 3 new columns:
+ 
+-One column for Gene Entrez ID
+-One column for mRNA differential expression tissue (preferably as reported by GTex). This column should have a list of 1 – 3 tissues where the mRNA for respective gene is found to be overabundant
+-Last column is to capture the URL where you found the tissue expression information.
+```{r}
+devtools::install_github("jamesdiao/clinvaR")
+require(clinvaR)
+install.packages("VarfromPDB")
+library(VarfromPDB)
+  clinvar.phenotype = extract_clinvar(keyword="retinoblastoma")
+genes.clinvar = clinvar.phenotype[[1]]
+ print(dim(genes.clinvar))
+variants.clinvar = clinvar.phenotype[[2]]
+print(dim(variants.clinvar))
+
+germline<-grep("germline", variants.clinvar$OriginSimple)
+
+germline_vars<-variants.clinvar[germline,]
+
+risk_factor<-grep("risk factor", germline_vars$ClinicalSignificance)
+
+germline_risk_factors_vars<-germline_vars[risk_factor,]
+
+write.csv(germline_risk_factors_vars, "/Users/la/Desktop/germline_rskfact_ranchoBiosc.csv")
+
+```
+
+One column for mRNA differential expression tissue (preferably as reported by GTex).   
+This column should have a list of 1 – 3 tissues where the mRNA for respective gene is found to be overabundant  
+-Last column is to capture the URL where you found the tissue expression information.  
+https://storage.googleapis.com/gtex_analysis_v7/multi_tissue_eqtl_data/GTEx_Analysis_v7.metasoft.txt.gz
+```{r getGenediff, eval =FALSE}
+install.packages("BiocManager")
+BiocManager::install("recount")
+
+## Check that you have a valid Bioconductor installation
+BiocManager::valid()
+
+library('recount')
+library("grex")
+data("gtexv7")
+id = gtexv7
+df = grex(id)
+tail(df)
+
+#file too large. will resort to using the GTex webportal : https://gtexportal.org/home/
+dat_tis<-data.table::fread("/Users/la/Desktop/eqtl_tissue_set.metasoft.txt", stringsAsFactors = F)
+```
+
+#Curation task
+This is a curation task. You should make a standalone python or R script file (.py or .R, .ipynb, .Rmd file types all accepted) for this task.
+Again, use Python or R, only commonly accepted packages allowed. 
+Please tell us how to run your programs, it's your responsibility to provide sufficient instructions so that we can run your scripts.
+Carefully read the instructions below:
+- Take a look at the "data" folder, there are several files in it, and their file names contain metadata that we need to retrieve and curate
+- The file naming convention is [patient_id]_[sample_id]_[treatment_time]_[drug_name]_[sample_type].[assay_type]
+- To simply the process, all ".fastq" files are data from the NGS assay type, and all ".flo" files are data from the FACS assay type
+- For example, the file "Sbuj123_123456_24hrs_aspirin_rna.fastq" means that 
+            patient_id = "Sbuj123", 
+            sample_id = "123456", 
+            treatment_time = "24hrs", 
+            drug_name = "aspirin", 
+            sample_type = "rna", 
+            assay_type = "NGS"
+- The goal is to extract and curate the information from the file names and create a data table of the information: see "template.csv" provided for format. 
+- Use the exact column names in "template.csv", it also has a row with expected values for the example explained above.
+- The letter cases are not harmonized in data files, however, in your curated output table, please use all lowercases
+- There are some well known typos in the data files. Hint: "aspErin" is actually "aspirin", you need to use the correct name in the curated output table
+- Complete this curation task programatically, we'll grade your script
+- Output curated table in a csv file, named "output_table.csv"
+```{r curationTask}
+#get list of all the file names in the data folder
+filenames<-basename(list.files("/Users/la/Desktop/technical_test/data", full.names = T))
+ 
+# Initiate a filelist object to store each filename  split  first by "_" then "\\." as a data frame with names :
+#"patient_id","sample_id","treatment_time","drug_name","sample_type assay_type"
+
+filelist<-list()
+
+ #Given the list of the filenames loop thorugh the list
+
+for(f in seq_along(filenames)){
+
+  # for each filesname first split  "_" then "\\." as a data frame with names :
+#"patient_id","sample_id","treatment_time","drug_name","sample_type assay_type"
+  
+  split_metadat<-reshape2::colsplit(filenames[f], "_",c("patient_id","sample_id","treatment_time","drug_name","sample_assay_type"))
+  split_sampAssay<-reshape2::colsplit(split_metadat$sample_assay_type, "\\.",c("sample_type","assay_type"))
+  split_nam<-as.data.frame(cbind(split_metadat[,-5],split_sampAssay))
+   #edit and clean the assay_type metadata  
+  split_nam$assay_type<-sub("^[Ff][Ll][Oo]$","FACS",split_nam$assay_type)
+  split_nam$assay_type<-sub("^fastq$","NGS",split_nam$assay_type)
+  #the store in filelist
+  filelist[[f]]<-split_nam
+  
+}
+
+##unlist the filelist by stacking each filename data_frame by rows (with commom colnames), and store to 1 data frame
+dat_file<-as.data.frame(do.call("rbind",filelist))
+ #clean  edit  annotations for consistency and finalize the output_table
+dat_file$drug_name<-sub("aspErin","aspirin",dat_file$drug_name ) 
+dat_file$drug_name<-sub("IBUPROFEN","ibuprofen",dat_file$drug_name )
+dat_file$sample_type<-sub("DNA","dna",dat_file$sample_type )
+dat_file$sample_type<-sub("RNA","rna",dat_file$sample_type )
+
+#write out the output to a csv  format table
+write.csv(dat_file,"./output_table.csv",row.names = F,quote = F)
+```
+
+
+#2. Write a function named perfect_squares(int a, int b) that takes a minimum and maximum and returns the number of perfect squares that exist in that range (inclusive). The max and min will always be integers and always given in the correct order
+
+Q2 test cases:
+should return 2, perfect_sqaures(4, 9)
+
+should return 1313, perfect_sqaures(100, 1748937)
+
+should return 272340, perfect_sqaures(1341, 74189027341)
+
+should return 9970871, perfect_squares(1341, 99418990273411)
+```{r getperfectSquare, eval =TRUE}
+#function takes as input two integers
+## embedded is.wholenumber-function to check that input max, min are  whole numbers  
+perfect_squares<-function(a,b){
+  
+is.wholenumber <-function(x, tol = .Machine$double.eps^0.5)  abs(x - round(x)) < tol
+#is.wholenumber(sqrt(10)) ; is.wholenumber(sqrt(64))
+# for a give  min max range, initiate numerical vector  to store  and tally perfect squares  
+sqrt_list<-0
+if(is.wholenumber(a) & is.wholenumber(b)){
+  #sort in Increasing order min , max input integers(a,b) , get all values in range (min, max) store if seqRange
+  seqRange<-sort.int(seq(a,b))
+  #Loop through the seqRange, claculate the sqrt of each value in seqRange, if it's a prefect square store in sqrt_list the value else store value as zero 
+  
+  #Then tally and print out  the total number of  perfect square roots or  "There are No Perfect Squares"
+    
+for(i in seq_along(seqRange)){
+  if(is.wholenumber(sqrt(seqRange[i]))){
+  sqrt_list[i]<-sqrt(seqRange[i])
+  }else{
+   sqrt_list[i]<-0
+  }
+ 
+
+}
+ifelse(length(sqrt_list[sqrt_list > 0]) > 0, print(length(sqrt_list[sqrt_list > 0])),print("There are No Perfect Squares")) 
+}  
+ 
+}
+
+
+ perfect_squares(4, 9) #should return 2,
+
+ perfect_squares(100, 1748937) #should return 1313,
+
+ #should return 272340:
+ perfect_squares(1341, 74189027341) # oops! Error in perfect_squares(1341, 74189027341) : long vectors not supported yet: eval.c:6387
+
+ #should return 9970871: 
+ perfect_squares(1341, 99418990273411) # oops! Error in perfect_squares(1341, 74189027341) : long vectors not supported yet: eval.c:6387
+
+```
+
+#Answer the questions on Git commands, assuming you are working in a Linux environment.
+1. Write the command to clone a directory called "git@github.com:user/foo" (test purposes only, not a real repository)
+2. Change into that directory
+3. Create a branch called "test"
+4. Change into that branch
+5. Create an empty file name "foo.txt"
+6. Add that file to the staging area
+7. Commit that file
+8. Push that file to the master branch on github
+```{bash gitCommand}
+
+#1. Write the command to clone a directory called "git@github.com:user/foo" (test purposes only, not a real repository)
+git clone git@github.com:user/foo
+
+#2. Change into that directory
+cd foo
+
+#3. Create a branch called "test"
+git pull ; git branch test; git checkout -b test
+
+#4. Change into that branch
+cd test
+
+#5. Create an empty file name "foo.txt"
+vi foo.txt
+
+#6. Add that file to the staging area
+ git add foo.txt 
+ 
+#7. Commit that file
+git commit -a -m  "commit_first_branch changes"
+
+#8. Push that file to the master branch on github
+ 
+git push origin master
+
+```
+
+ 
+ ##Linux_Command_line_Questions
+ Write the commands necessary to:
+1. Create a directory in home named "test"
+2. Create an empty file name in home named "foo.txt"
+3. Create a directory inside of "test" called "temp"
+4. Copy "foo.txt" from home into "temp"
+5. Delete the "foo.txt" in home
+6. Change the current working directory to "test/temp"
+7. Change the name of "foo.txt" to "bar.txt"
+8. Print the path to the current working directory
+9. Change the current working directory to home
+10. Explain the difference between a relative and absolute path
+```{bash linuxcommnds}
+ # Questions 1 - 9
+ 
+# 1. Create a directory in home named "test"
+
+cd 
+mkdir $HOME/test
+
+#2. Create an empty file name in home named "foo.txt"
+vi foo.txt
+
+#3. Create a directory inside of "test" called "temp"
+mkdir test/temp
+
+#4. Copy "foo.txt" from home into "temp"
+cp foo.txt test/temp
+
+#5. Delete the "foo.txt" in home
+rm foo.txt
+
+#6. Change the current working directory to "test/temp"
+cd test/temp
+
+#7. Change the name of "foo.txt" to "bar.txt"
+ls 
+mv foo.txt bar.txt
+#8. Print the path to the current working directory
+pwd 
+$HOME/test/temp
+#9. Change the current working directory to home
+cd
+#10. Explain the difference between a relative and absolute path
+ 
+
+
+```
+#10. Explain the difference between a relative and absolute path
+e.g. given the same path to the same file location;
+ relative path  starts from the working directory, without providing the full absolute path which includes the root directory
+ absolute path  points to the same path by including the complete path with the root directory
+
+
+
+
+ 
+ 
